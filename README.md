@@ -1,50 +1,98 @@
 # GeoKernel-Lite: 2D Computational Geometry Kernel and Visual Debugging Platform
 
-A lightweight C++ 2D computational geometry kernel with robust geometric predicates, classic geometry algorithms, degenerate-case testing, and an interactive Streamlit-based visual debugging platform.
+[![windows](https://github.com/lazyJLBL/GeoKernel-Lite/actions/workflows/windows.yml/badge.svg)](https://github.com/lazyJLBL/GeoKernel-Lite/actions/workflows/windows.yml)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+A lightweight C++ 2D computational geometry kernel with robust predicates, classic geometry algorithms, edge-case tests, and Streamlit visual debugging.
 
 GeoKernel-Lite 是一个面向 CAD/CAX、GIS、图形算法和工业软件研发场景的二维计算几何算法内核项目。核心算法使用 C++17 实现，可视化调试平台使用 Python + Streamlit + Plotly 构建，用于展示算法结果和中间 trace。
 
+## Project Highlights
+
+- C++17 geometry kernel with `Point2D`, `Segment2D`, `Polygon2D`, `HalfPlane2D`, and related primitives.
+- Robust geometric predicates with EPS-aware equality, strict sortable ordering, boundary-aware classifications, and polygon normalization.
+- Classic geometry algorithms: convex hull, rotating calipers, segment intersection search, half-plane intersection, closest pair, polygon clipping, and ear clipping triangulation.
+- Experimental Bowyer-Watson Delaunay triangulation for visualization and future expansion.
+- CLI + JSON boundary between the C++ kernel and Python UI, keeping the algorithm core independent from Streamlit.
+- 56 degenerate and boundary cases covering collinearity, overlaps, endpoint touches, duplicate points, tiny distances, orientation issues, empty intersections, and degenerate polygon results.
+
+## Visual Debugging Screenshots
+
+| Convex Hull | Segment Intersection | Polygon Clipping |
+|---|---|---|
+| ![Convex hull demo](assets/convex_hull_demo.png) | ![Segment intersection demo](assets/segment_intersection_demo.png) | ![Polygon clipping demo](assets/polygon_clipping_demo.png) |
+
+| Half-Plane Intersection | Closest Pair | Triangulation |
+|---|---|---|
+| ![Half-plane intersection demo](assets/half_plane_intersection_demo.png) | ![Closest pair demo](assets/closest_pair_demo.png) | ![Triangulation demo](assets/triangulation_demo.png) |
+
 ## Features
 
-- Geometry primitives: `Point2D`, `Vector2D`, `Line2D`, `Segment2D`, `Circle2D`, `Polygon2D`, `HalfPlane2D`, `Box2D`, `Triangle2D`.
-- Robust predicates: EPS-based comparison, orientation tests, segment overlap classification, point-in-polygon boundary detection, polygon normalization.
-- Algorithms: Andrew/Graham convex hull, rotating calipers, segment intersection search, half-plane intersection, closest pair, Sutherland-Hodgman clipping, ear clipping triangulation, experimental Delaunay triangulation.
-- Visual debugging: Streamlit tabs for all algorithms, Plotly geometry layers, trace step slider, robustness case browser.
-- Testing: GoogleTest C++ tests, pytest Python tests, and 50+ JSON boundary cases.
+### Geometry Primitives
 
-## Project Structure
+- Point, vector, line, segment, circle, polygon, half-plane, box, and triangle types.
+- Dot product, cross product, orientation test, distance, projection, and reflection helpers.
+- Segment intersection with `None`, `Point`, and `Overlap` classification.
+- Point-in-polygon with `Outside`, `Inside`, and `OnBoundary` classification.
+- Polygon area, orientation checks, and counter-clockwise normalization.
 
-```text
-GeoKernel-Lite/
-├── core/                  # Header-only C++ geometry kernel
-├── apps/                  # geokernel_demo CLI
-├── python/                # Python case loader, runner, visualization adapter
-├── visualizer/            # Streamlit + Plotly app
-├── tests/                 # C++ tests, Python tests, boundary cases
-├── docs/                  # Algorithms, robustness, API, design notes
-├── examples/              # Reproducible JSON examples
-├── benchmarks/            # Simple C++ benchmark target
-├── assets/                # README screenshots placeholder directory
-└── CMakeLists.txt
-```
+### Algorithms
+
+- Andrew convex hull and Graham-compatible entry point.
+- Rotating calipers for convex diameter and minimum-area bounding rectangle.
+- Segment intersection search with classified point and overlap results.
+- Half-plane intersection clipped by a configurable visualization bounding box.
+- Divide-and-conquer closest pair of points.
+- Sutherland-Hodgman polygon clipping.
+- Ear clipping triangulation with area verification.
+- Experimental Delaunay triangulation.
+
+### Visualization
+
+- Streamlit tabs for each algorithm.
+- Plotly geometry layers for points, segments, polygons, hulls, clipping windows, closest-pair links, and triangulation results.
+- Trace step slider for intermediate algorithm states.
+- Robustness case browser backed by the same JSON cases used in tests.
 
 ## Quick Start
+
+Install dependencies:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Build and test the C++ targets:
 
 ```powershell
 cmake -S . -B build
 cmake --build build
-ctest --test-dir build
-pytest
+ctest --test-dir build --output-on-failure
+```
+
+Run Python tests:
+
+```powershell
+python -m pytest
+```
+
+Launch the visualizer:
+
+```powershell
 streamlit run visualizer/app.py
 ```
 
-The current integration boundary is CLI + JSON:
+## CLI Demo
+
+The C++ command-line tool uses a stable JSON envelope so it can be called from scripts, tests, or the Streamlit UI.
 
 ```powershell
 .\build\geokernel_demo.exe --algorithm convex_hull --input examples\convex_hull.json --output out.json --trace --pretty
 ```
 
-All successful CLI responses follow this envelope:
+Successful responses use this shape:
 
 ```json
 {
@@ -56,21 +104,39 @@ All successful CLI responses follow this envelope:
 }
 ```
 
+Supported algorithm names:
+
+- `convex_hull`
+- `rotating_calipers`
+- `segment_intersection`
+- `half_plane_intersection`
+- `polygon_clipping`
+- `closest_pair`
+- `triangulation`
+- `delaunay`
+
+## Project Structure
+
+```text
+GeoKernel-Lite/
+|-- core/                  # Header-only C++ geometry kernel
+|-- apps/                  # geokernel_demo CLI
+|-- python/                # Python case loader, runner, visualization adapter
+|-- visualizer/            # Streamlit + Plotly app
+|-- tests/                 # C++ tests, Python tests, boundary cases
+|-- docs/                  # Algorithms, robustness, API, design notes
+|-- examples/              # Reproducible JSON examples
+|-- benchmarks/            # Simple C++ benchmark target
+|-- assets/                # README screenshots
+`-- CMakeLists.txt
+```
+
 ## Robustness Focus
 
-The project deliberately avoids returning only `bool` for important geometric predicates. Segment intersection returns `None`, `Point`, or `Overlap`; point-in-polygon returns `Outside`, `Inside`, or `OnBoundary`; clipping and half-plane intersection return explicit status values.
+GeoKernel-Lite treats robustness as a first-class API concern. Important geometric predicates do not collapse ambiguous states into `bool`: segment intersection reports point vs overlap, point-in-polygon reports boundary hits, clipping reports empty vs polygon vs degenerate, and half-plane intersection reports bounded, unbounded, empty, or degenerate results.
 
-The test catalog includes duplicated points, all-collinear inputs, near-collinear precision cases, zero-length segments, endpoint touching, overlapping segments, polygon orientation normalization, empty intersections, degenerate clipping, and experimental Delaunay cases.
+See [docs/robustness.md](docs/robustness.md) and [docs/edge_cases_report.md](docs/edge_cases_report.md) for the detailed policy and boundary-case catalog.
 
-## Resume Description
+## Release Status
 
-GeoKernel-Lite: 2D Computational Geometry Kernel and Visual Debugging Platform
-
-- Designed and implemented a lightweight 2D computational geometry kernel in C++.
-- Implemented classic and advanced geometry algorithms including convex hull, rotating calipers, sweep-line style segment intersection, half-plane intersection, closest pair, polygon clipping, and triangulation.
-- Built a Streamlit + Plotly visual debugging platform with algorithm trace playback.
-- Designed 50+ degenerate and boundary cases covering collinearity, overlap, endpoint intersections, duplicate points, floating-point precision, polygon orientation, and empty intersections.
-
-## Status
-
-This repository is Windows-first for v1. `Delaunay` is included under the public API as an experimental feature and should not be treated as the same stability tier as the core seven algorithms.
+`v1.0.0` is the first portfolio-ready release target. The core seven algorithms are treated as stable v1 functionality; Delaunay remains explicitly experimental.
