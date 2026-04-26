@@ -29,3 +29,17 @@ def test_visualization_builds_segment_figure():
     payload = {"input": {"segments": [[[0, 0], [1, 1]], [[0, 1], [1, 0]]]}}
     fig = figure_for_result("segment_intersection", payload)
     assert len(fig.data) == 2
+
+
+def test_visualization_builds_predicate_compare_figure():
+    payload = {"input": {"predicate": "orient2d", "points": [[0, 0], [1, 0], [0.5, 1e-12]]}}
+    output = {
+        "result": {
+            "predicate": "orient2d",
+            "eps_differs_from_exact": True,
+            "filtered_matches_exact": True,
+        },
+        "trace": [],
+    }
+    fig = figure_for_result("predicate_compare", payload, output)
+    assert len(fig.data) == 1

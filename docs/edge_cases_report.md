@@ -1,8 +1,8 @@
 # Edge Cases Report
 
-The boundary-case catalog lives in `tests/cases/catalog.json` and currently contains 56
-cases. The same catalog is used by the visualizer's robustness tab and Python tests, so
-documentation, demos, and test data stay aligned.
+The boundary-case catalog lives in `tests/cases/*.json` and currently contains 100+
+cases. The same catalogs are used by the visualizer's robustness tab and Python tests,
+so documentation, demos, and test data stay aligned.
 
 ## Coverage Summary
 
@@ -16,6 +16,7 @@ documentation, demos, and test data stay aligned.
 | Closest pair            |     7 | duplicate points, tiny distance, large coordinates, grid ties, negative coordinates, insufficient input |
 | Triangulation           |     7 | convex, concave, clockwise input, duplicate vertex, collinear vertex, self-intersection                 |
 | Delaunay experimental   |     7 | triangle, square, duplicates, interior point, collinear input, large coordinates, random cloud          |
+| Predicate comparison    |    50 | near-collinear orientation, near-cocircular incircle, duplicate points, mixed coordinate scales         |
 
 ## Convex Hull Cases
 
@@ -139,6 +140,12 @@ This catches missing ears, overlapping triangles, and incorrect orientation hand
 | `delaunay_collinear`         | collinear input            | documented experimental degeneracy |
 | `delaunay_large_coordinates` | large values               | accepted by prototype              |
 | `delaunay_random_cloud`      | small non-degenerate cloud | experimental triangulation         |
+
+## Predicate Comparison Cases
+
+`tests/cases/predicate_failures.json` covers EPS-vs-exact disagreement for
+`orient2d` and `incircle`. These cases are executable through the `predicate_compare`
+CLI path and the visualizer robustness tab.
 
 ## Acceptance Criteria
 

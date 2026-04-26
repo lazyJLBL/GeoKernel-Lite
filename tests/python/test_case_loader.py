@@ -18,6 +18,7 @@ def test_catalog_contains_at_least_50_boundary_cases():
         "closest_pair",
         "triangulation",
         "delaunay",
+        "predicate_compare",
     }
 
 

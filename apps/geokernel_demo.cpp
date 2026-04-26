@@ -134,6 +134,18 @@ json segmentIntersectionJson(const SegmentIntersectionResult& result) {
     return out;
 }
 
+json predicateComparisonJson(const PredicateComparisonResult& result) {
+    return {
+        {"predicate", result.predicate},
+        {"eps", {{"sign", result.epsSign}, {"estimate", result.epsEstimate}}},
+        {"filtered", {{"sign", result.filteredSign}, {"estimate", result.filteredEstimate}}},
+        {"exact", {{"sign", result.exactSign}}},
+        {"eps_differs_from_exact", result.epsDiffersFromExact},
+        {"filtered_matches_exact", result.filteredMatchesExact},
+        {"disagreement", result.disagreement}
+    };
+}
+
 json envelope(json result, json summary, json trace, json warnings) {
     return {
         {"status", "ok"},
@@ -185,13 +197,53 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
     }
 
     if (algorithm == "segment_intersection" || algorithm == "sweep_line") {
-        auto result = findSegmentIntersections(parseSegments(input.at("segments")), options);
+        const PredicateMode predicateMode = predicateModeFromString(input.value("predicate_mode", "filtered_exact"));
+        auto result = findSegmentIntersections(parseSegments(input.at("segments")), options, predicateMode);
         json pairs = json::array();
         for (const auto& pair : result.pairs) {
             pairs.push_back({{"first", pair.first}, {"second", pair.second}, {"intersection", segmentIntersectionJson(pair.intersection)}});
         }
         json body = {{"has_intersection", result.hasIntersection}, {"pairs", pairs}};
-        return envelope(body, {{"algorithm", "segment_intersection"}, {"pair_count", result.pairs.size()}}, traceJson(result.trace), warningsJson(result.warnings));
+        return envelope(
+            body,
+            {
+                {"algorithm", "segment_intersection"},
+                {"pair_count", result.pairs.size()},
+                {"reported_pair_count", result.pairs.size()},
+                {"event_count", result.eventCount},
+                {"implementation", result.implementation},
+                {"predicate_mode", predicateModeName(result.predicateMode)}
+            },
+            traceJson(result.trace),
+            warningsJson(result.warnings));
+    }
+
+    if (algorithm == "predicate_compare") {
+        const std::string predicate = input.value("predicate", "orient2d");
+        const double eps = input.value("eps", EPS);
+        const auto points = parsePoints(input.at("points"));
+        PredicateComparisonResult comparison;
+        if (predicate == "orient2d") {
+            if (points.size() != 3) throw std::runtime_error("orient2d requires exactly 3 points");
+            comparison = compareOrient2d(points[0], points[1], points[2], eps);
+        } else if (predicate == "incircle") {
+            if (points.size() != 4) throw std::runtime_error("incircle requires exactly 4 points");
+            comparison = compareIncircle(points[0], points[1], points[2], points[3], eps);
+        } else {
+            throw std::runtime_error("unknown predicate: " + predicate);
+        }
+        json body = predicateComparisonJson(comparison);
+        body["points"] = polygonJson(Polygon2D{points});
+        return envelope(
+            body,
+            {
+                {"algorithm", "predicate_compare"},
+                {"predicate", comparison.predicate},
+                {"eps_differs_from_exact", comparison.epsDiffersFromExact},
+                {"filtered_matches_exact", comparison.filteredMatchesExact}
+            },
+            json::array(),
+            json::array());
     }
 
     if (algorithm == "half_plane_intersection") {

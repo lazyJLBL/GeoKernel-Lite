@@ -1,0 +1,10 @@
+{
+  "input": {
+    "predicate": "orient2d",
+    "points": [
+      [0, 0],
+      [1, 0],
+      [0.5, 1e-12]
+    ]
+  }
+}

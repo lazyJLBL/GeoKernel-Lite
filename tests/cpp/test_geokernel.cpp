@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <limits>
+#include <set>
+
 #include "geokernel/geokernel.hpp"
 
 using namespace geokernel;
@@ -7,6 +10,43 @@ using namespace geokernel;
 TEST(Point2DTest, UsesEpsEquality) {
     EXPECT_TRUE(equals(Point2D{1.0, 2.0}, Point2D{1.0 + 1e-10, 2.0 - 1e-10}));
     EXPECT_EQ(sign(cross(Point2D{1, 0}, Point2D{0, 1})), 1);
+}
+
+TEST(PredicateTest, ExactOrientationDistinguishesEpsCollapse) {
+    Point2D a{0, 0};
+    Point2D b{1, 0};
+    Point2D c{0.5, 1e-12};
+
+    EXPECT_EQ(orient2dEps(a, b, c), 0);
+    EXPECT_EQ(orient2dExact(a, b, c), 1);
+    EXPECT_EQ(orient2dFiltered(a, b, c), orient2dExact(a, b, c));
+
+    const auto comparison = compareOrient2d(a, b, c);
+    EXPECT_TRUE(comparison.epsDiffersFromExact);
+    EXPECT_TRUE(comparison.filteredMatchesExact);
+}
+
+TEST(PredicateTest, ExactIncircleDistinguishesEpsCollapse) {
+    Point2D a{0, 0};
+    Point2D b{1, 0};
+    Point2D c{0, 1};
+    Point2D d{1, 0.999999999999};
+
+    EXPECT_EQ(incircleEps(a, b, c, d), 0);
+    EXPECT_EQ(incircleExact(a, b, c, d), 1);
+    EXPECT_EQ(incircleFiltered(a, b, c, d), incircleExact(a, b, c, d));
+
+    const auto comparison = compareIncircle(a, b, c, d);
+    EXPECT_TRUE(comparison.epsDiffersFromExact);
+    EXPECT_TRUE(comparison.filteredMatchesExact);
+}
+
+TEST(PredicateTest, RejectsNonFiniteInputs) {
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    EXPECT_THROW(orient2dExact(0, 0, inf, 0, 1, 1), std::invalid_argument);
+    EXPECT_THROW(incircleFiltered(0, 0, 1, 0, 0, 1, nan, 1), std::invalid_argument);
 }
 
 TEST(SegmentIntersectionTest, ClassifiesOverlapAndEndpoint) {
@@ -20,6 +60,14 @@ TEST(SegmentIntersectionTest, ClassifiesOverlapAndEndpoint) {
     ASSERT_EQ(endpoint.type, IntersectionType::Point);
     ASSERT_TRUE(endpoint.point.has_value());
     EXPECT_TRUE(equals(*endpoint.point, Point2D{1, 1}));
+}
+
+TEST(SegmentIntersectionTest, ExactModeDoesNotTreatNearParallelSegmentsAsCollinear) {
+    Segment2D a{{0, 0}, {2, 0}};
+    Segment2D b{{1, 1e-10}, {3, 1e-10}};
+
+    EXPECT_EQ(segmentIntersection(a, b, PredicateMode::Eps).type, IntersectionType::Overlap);
+    EXPECT_EQ(segmentIntersection(a, b, PredicateMode::FilteredExact).type, IntersectionType::None);
 }
 
 TEST(PolygonTest, ClassifiesInsideBoundaryOutside) {
@@ -55,7 +103,34 @@ TEST(SweepLineTest, FindsAllPairs) {
     auto result = findSegmentIntersections(segments, options);
     EXPECT_TRUE(result.hasIntersection);
     EXPECT_EQ(result.pairs.size(), 1);
+    EXPECT_EQ(result.implementation, "sweep_line_active_set");
+    EXPECT_EQ(result.predicateMode, PredicateMode::FilteredExact);
     EXPECT_FALSE(result.trace.empty());
+}
+
+TEST(SweepLineTest, MatchesBruteForceOracleOnDegenerateSet) {
+    std::vector<Segment2D> segments{
+        {{0, 0}, {3, 3}},
+        {{0, 3}, {3, 0}},
+        {{1, -1}, {1, 4}},
+        {{0, 1}, {2, 1}},
+        {{1, 1}, {1, 1}},
+        {{0, 0}, {2, 0}},
+        {{1, 0}, {3, 0}},
+        {{4, 4}, {5, 5}}
+    };
+
+    const auto sweep = findSegmentIntersections(segments);
+    const auto brute = bruteForceSegmentIntersections(segments);
+
+    auto keys = [](const SegmentIntersectionSearchResult& result) {
+        std::set<std::pair<int, int>> out;
+        for (const auto& pair : result.pairs) out.insert({pair.first, pair.second});
+        return out;
+    };
+
+    EXPECT_EQ(keys(sweep), keys(brute));
+    EXPECT_EQ(sweep.eventCount, segments.size() * 2);
 }
 
 TEST(ClippingTest, ClipsConvexWindow) {

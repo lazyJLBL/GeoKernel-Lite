@@ -7,7 +7,8 @@ contract rather than incidental behavior.
 
 ## Floating-Point Policy
 
-The project centralizes floating-point decisions in a small set of helpers:
+The legacy algorithm layer centralizes EPS-based floating-point decisions in a small
+set of helpers:
 
 - `EPS = 1e-9`
 - `sign(double)`
@@ -16,9 +17,19 @@ The project centralizes floating-point decisions in a small set of helpers:
 - `lessThan(double, double)`
 - `lessOrEqual(double, double)`
 
-Algorithms should use `sign(cross(...))` for geometric orientation and `equals(...)` for
-semantic equality. Raw checks such as `fabs(x) < 1e-9` should not be scattered through
-algorithm code.
+Existing algorithms use `sign(cross(...))` for EPS-based geometric orientation and
+`equals(...)` for semantic equality. Raw checks such as `fabs(x) < 1e-9` should not be
+scattered through algorithm code.
+
+The P0 predicate layer adds explicit alternatives:
+
+- `orient2dEps` / `incircleEps`
+- `orient2dFiltered` / `incircleFiltered`
+- `orient2dExact` / `incircleExact`
+
+Filtered predicates take the fast double path when the sign is numerically separated
+from zero, then fall back to dependency-free exact dyadic arithmetic for finite
+IEEE-754 `double` inputs.
 
 ## Equality vs Ordering
 
@@ -78,6 +89,10 @@ Covered cases include:
 - partial overlap
 - full overlap
 - near-collinear inputs under EPS
+
+The CLI `segment_intersection` path now defaults to filtered exact predicate
+classification. Passing `predicate_mode: "eps"` reproduces the legacy EPS behavior for
+debugging and comparison.
 
 ## Point in Polygon
 
@@ -178,9 +193,12 @@ triangles.
 
 ## Known Limits
 
-- The predicates are EPS-based, not exact arithmetic predicates.
-- The current segment intersection search is an all-pairs implementation with sweep-line
-  style trace output, not a full Bentley-Ottmann implementation.
+- Most legacy algorithms still use EPS-based predicates unless explicitly documented.
+- Exact predicates currently cover `orient2d` and `incircle`; they are not yet threaded
+  through every algorithm.
+- Segment intersection uses an event-based active-set sweep and exact predicate
+  classification, with brute force retained as an oracle. Degenerate collinear overlaps
+  are reported pairwise rather than merged into a topology graph.
 - Half-plane intersection is implemented through iterative polygon clipping for stable
   visualization behavior.
 - Delaunay triangulation is experimental and should be treated as a prototype for

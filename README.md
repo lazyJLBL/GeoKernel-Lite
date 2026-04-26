@@ -1,15 +1,16 @@
-# GeoKernel-Lite: 2D Computational Geometry Kernel and Visual Debugging Platform
+# GeoKernel-Lite: Robust 2D Computational Geometry Playground
 
 [![Windows CI](https://github.com/lazyJLBL/GeoKernel-Lite/actions/workflows/windows.yml/badge.svg)](https://github.com/lazyJLBL/GeoKernel-Lite/actions/workflows/windows.yml)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A lightweight C++ 2D computational geometry kernel with robust predicates, classic
-geometry algorithms, edge-case tests, and Streamlit visual debugging.
+A lightweight C++17 2D computational geometry playground focused on robust
+predicates, degeneracy handling, algorithm tracing, and Streamlit visual debugging.
 
-GeoKernel-Lite 是一个面向 CAD/CAX、GIS、图形算法和工业软件研发场景的二维计算几何算法内核项目。核心算法使用 C++17 实现，可视化调试平台使用 Python +
-Streamlit + Plotly 构建，用于展示算法结果和中间 trace。
+GeoKernel-Lite 是一个专注于鲁棒谓词、退化案例处理、算法 trace 和可视化调试的
+2D 计算几何实验内核。它不是 CGAL/GEOS 的替代品；目标是把计算几何中最容易错
+的边界情况展示清楚，并给出可测试、可对比的实现。
 
 ## Visual Debugging Screenshots
 
@@ -25,18 +26,20 @@ Streamlit + Plotly 构建，用于展示算法结果和中间 trace。
 
 - C++17 geometry kernel with `Point2D`, `Segment2D`, `Polygon2D`, `HalfPlane2D`, and
   related primitives.
-- Robust geometric predicates with EPS-aware equality, strict sortable ordering,
-  boundary-aware classifications, and polygon normalization.
+- Predicate comparison API for EPS, filtered exact, and exact `orient2d` / `incircle`
+  sign classification over finite `double` inputs.
 - Classic geometry algorithms: convex hull, rotating calipers, segment intersection
   search, half-plane intersection, closest pair, polygon clipping, and ear clipping
   triangulation.
+- Sweep-line segment intersection search backed by exact predicate classification,
+  with a brute-force oracle kept for tests and benchmarks.
 - Experimental Bowyer-Watson Delaunay triangulation for visualization and future
   expansion.
 - CLI + JSON boundary between the C++ kernel and Python UI, keeping the algorithm core
   independent from Streamlit.
-- 56 degenerate and boundary cases covering collinearity, overlaps, endpoint touches,
-  duplicate points, tiny distances, orientation issues, empty intersections, and
-  degenerate polygon results.
+- 100+ degenerate and boundary cases covering collinearity, overlaps, endpoint touches,
+  duplicate points, tiny distances, near-cocircular inputs, orientation issues, empty
+  intersections, and degenerate polygon results.
 
 ## Features
 
@@ -46,6 +49,7 @@ Streamlit + Plotly 构建，用于展示算法结果和中间 trace。
 - Dot product, cross product, orientation test, distance, projection, and reflection
   helpers.
 - Segment intersection with `None`, `Point`, and `Overlap` classification.
+- Exact and filtered predicate helpers for orientation and incircle tests.
 - Point-in-polygon with `Outside`, `Inside`, and `OnBoundary` classification.
 - Polygon area, orientation checks, and counter-clockwise normalization.
 
@@ -59,6 +63,7 @@ Streamlit + Plotly 构建，用于展示算法结果和中间 trace。
 - Sutherland-Hodgman polygon clipping.
 - Ear clipping triangulation with area verification.
 - Experimental Delaunay triangulation.
+- Predicate comparison for EPS failure analysis.
 
 ### Visualization
 
@@ -122,6 +127,7 @@ Supported algorithm names:
 - `convex_hull`
 - `rotating_calipers`
 - `segment_intersection`
+- `predicate_compare`
 - `half_plane_intersection`
 - `polygon_clipping`
 - `closest_pair`
@@ -146,15 +152,16 @@ GeoKernel-Lite/
 
 ## Robustness Focus
 
-GeoKernel-Lite treats robustness as a first-class API concern. Important geometric
-predicates do not collapse ambiguous states into `bool`: segment intersection reports
-point vs overlap, point-in-polygon reports boundary hits, clipping reports empty vs
-polygon vs degenerate, and half-plane intersection reports bounded, unbounded, empty, or
-degenerate results.
+GeoKernel-Lite treats robustness as a first-class API concern, but it is explicit about
+which layer is EPS-based and which layer is exact. Legacy algorithms still use shared
+EPS helpers where documented. The P0 predicate layer adds filtered exact and exact sign
+classification for `orient2d` and `incircle`, and the segment search path defaults to
+filtered exact classification.
 
 See [docs/robustness.md](docs/robustness.md) and
-[docs/edge_cases_report.md](docs/edge_cases_report.md) for the detailed policy and
-boundary-case catalog.
+[docs/predicates.md](docs/predicates.md), [docs/sweep_line.md](docs/sweep_line.md), and
+[docs/robustness_failures.md](docs/robustness_failures.md) for the detailed policy,
+boundary-case catalog, and current limitations.
 
 ## Release Status
 

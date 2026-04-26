@@ -36,10 +36,21 @@ def load_case(path: str | Path) -> dict[str, Any]:
         return json.load(handle)
 
 
-def load_case_catalog(path: str | Path = DEFAULT_CATALOG) -> list[CaseRecord]:
+def _records_from_path(path: str | Path) -> list[CaseRecord]:
     data = load_case(path)
     cases = data.get("cases", data if isinstance(data, list) else [])
     return [_case_from_dict(case) for case in cases]
+
+
+def load_case_catalog(path: str | Path = DEFAULT_CATALOG) -> list[CaseRecord]:
+    path = Path(path)
+    if path != DEFAULT_CATALOG:
+        return _records_from_path(path)
+
+    records: list[CaseRecord] = []
+    for case_file in sorted(DEFAULT_CATALOG.parent.glob("*.json")):
+        records.extend(_records_from_path(case_file))
+    return records
 
 
 def list_cases(algorithm: str | None = None, tags: Iterable[str] | None = None) -> list[CaseRecord]:

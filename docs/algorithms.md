@@ -17,9 +17,23 @@ returns corners, area, width, height, and angle.
 
 ## Segment Intersection
 
-`findSegmentIntersections(segments, options)` returns all intersecting segment pairs
-with `None`, `Point`, or `Overlap` classification. The trace records sorted endpoint
-events and candidate checks.
+`findSegmentIntersections(segments, options, predicateMode)` defaults to the sweep-line
+implementation and returns all intersecting segment pairs with `None`, `Point`, or
+`Overlap` classification. The trace records sorted endpoint events, active-set candidate
+checks, and per-x sweep progress.
+
+`bruteForceSegmentIntersections(segments, options, predicateMode)` is retained as a
+correctness oracle for tests and benchmarks.
+
+The CLI `segment_intersection` path defaults to `filtered_exact` predicates. Use
+`predicate_mode: "eps"` in the input payload when reproducing legacy EPS behavior.
+
+## Predicate Comparison
+
+`compareOrient2d(...)` and `compareIncircle(...)` report EPS, filtered exact, and exact
+sign classifications for the same input. The CLI exposes this as `predicate_compare`.
+It is used by the robustness gallery to show when EPS collapses a nonzero orientation or
+incircle determinant to zero.
 
 ## Half-Plane Intersection
 

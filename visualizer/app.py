@@ -17,6 +17,7 @@ from geokernel_lite.visualization import figure_for_result
 
 
 ALGORITHMS = [
+    "predicate_compare",
     "convex_hull",
     "rotating_calipers",
     "segment_intersection",
@@ -92,6 +93,7 @@ def render_robustness_tab() -> None:
     st.metric("Boundary cases", len(cases))
     algorithms = sorted({case.algorithm for case in cases})
     selected = st.multiselect("Algorithms", algorithms, default=algorithms)
+    filtered_cases = [case for case in cases if case.algorithm in selected]
     rows = [
         {
             "name": case.name,
@@ -99,10 +101,34 @@ def render_robustness_tab() -> None:
             "description": case.description,
             "tags": ", ".join(case.tags),
         }
-        for case in cases
-        if case.algorithm in selected
+        for case in filtered_cases
     ]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, height=560)
+
+    if not filtered_cases:
+        return
+
+    selected_case_name = st.selectbox("Inspect case", [case.name for case in filtered_cases], key="robustness_case")
+    selected_case = next(case for case in filtered_cases if case.name == selected_case_name)
+    st.json({"algorithm": selected_case.algorithm, "input": selected_case.input, "expected": selected_case.expected}, expanded=False)
+
+    if selected_case.algorithm == "predicate_compare":
+        executable = locate_demo_executable()
+        if executable is None:
+            st.warning("Build `geokernel_demo` first to execute predicate comparisons.")
+            return
+        try:
+            output = GeoKernelRunner(executable).run("predicate_compare", selected_case.input, trace=False)
+        except Exception as exc:
+            st.error(str(exc))
+            return
+        fig = figure_for_result("predicate_compare", {"input": selected_case.input}, output)
+        st.plotly_chart(fig, use_container_width=True)
+        left, middle, right = st.columns(3)
+        left.metric("EPS sign", output["result"]["eps"]["sign"])
+        middle.metric("Filtered sign", output["result"]["filtered"]["sign"])
+        right.metric("Exact sign", output["result"]["exact"]["sign"])
+        st.json(output["result"], expanded=False)
 
 
 def main() -> None:

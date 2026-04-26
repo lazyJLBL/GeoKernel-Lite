@@ -8,9 +8,12 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "geokernel/predicates/predicates.hpp"
 
 namespace geokernel {
 
@@ -203,44 +206,85 @@ struct SegmentIntersectionResult {
     std::optional<Segment2D> overlap;
 };
 
-inline SegmentIntersectionResult segmentIntersection(const Segment2D& s1, const Segment2D& s2) {
+inline bool pointEqualsByMode(const Point2D& a, const Point2D& b, PredicateMode mode) {
+    return mode == PredicateMode::Eps ? equals(a, b) : (a.x == b.x && a.y == b.y);
+}
+
+inline bool segmentIsPointByMode(const Segment2D& s, PredicateMode mode) {
+    return pointEqualsByMode(s.a, s.b, mode);
+}
+
+inline bool pointLessByMode(const Point2D& a, const Point2D& b, PredicateMode mode) {
+    if (mode == PredicateMode::Eps && equals(a, b)) return false;
+    if (a.x != b.x) return a.x < b.x;
+    return a.y < b.y;
+}
+
+inline bool coordinateBetween(double lo, double value, double hi, PredicateMode mode) {
+    const double minValue = std::min(lo, hi);
+    const double maxValue = std::max(lo, hi);
+    if (mode == PredicateMode::Eps) {
+        return lessOrEqual(minValue, value) && lessOrEqual(value, maxValue);
+    }
+    return minValue <= value && value <= maxValue;
+}
+
+inline bool segmentContainsPoint(const Segment2D& s, const Point2D& p, PredicateMode mode) {
+    if (mode == PredicateMode::Eps) return s.contains(p);
+    return orient2d(s.a, s.b, p, mode) == 0 &&
+           coordinateBetween(s.a.x, p.x, s.b.x, mode) &&
+           coordinateBetween(s.a.y, p.y, s.b.y, mode);
+}
+
+inline std::optional<Point2D> lineIntersectionRaw(const Line2D& a, const Line2D& b) {
+    const double denom = cross(a.dir, b.dir);
+    if (denom == 0.0) return std::nullopt;
+    return a.p + a.dir * (cross(b.p - a.p, b.dir) / denom);
+}
+
+inline SegmentIntersectionResult segmentIntersection(const Segment2D& s1, const Segment2D& s2, PredicateMode mode = PredicateMode::Eps) {
     SegmentIntersectionResult result;
-    if (s1.isPoint() && s2.isPoint()) {
-        if (equals(s1.a, s2.a)) {
+    const bool s1Point = segmentIsPointByMode(s1, mode);
+    const bool s2Point = segmentIsPointByMode(s2, mode);
+    if (s1Point && s2Point) {
+        if (pointEqualsByMode(s1.a, s2.a, mode)) {
             result.type = IntersectionType::Point;
             result.point = s1.a;
         }
         return result;
     }
-    if (s1.isPoint()) {
-        if (s2.contains(s1.a)) {
+    if (s1Point) {
+        if (segmentContainsPoint(s2, s1.a, mode)) {
             result.type = IntersectionType::Point;
             result.point = s1.a;
         }
         return result;
     }
-    if (s2.isPoint()) {
-        if (s1.contains(s2.a)) {
+    if (s2Point) {
+        if (segmentContainsPoint(s1, s2.a, mode)) {
             result.type = IntersectionType::Point;
             result.point = s2.a;
         }
         return result;
     }
 
-    const int o1 = orientation(s1.a, s1.b, s2.a);
-    const int o2 = orientation(s1.a, s1.b, s2.b);
-    const int o3 = orientation(s2.a, s2.b, s1.a);
-    const int o4 = orientation(s2.a, s2.b, s1.b);
+    const int o1 = mode == PredicateMode::Eps ? orientation(s1.a, s1.b, s2.a) : orient2d(s1.a, s1.b, s2.a, mode);
+    const int o2 = mode == PredicateMode::Eps ? orientation(s1.a, s1.b, s2.b) : orient2d(s1.a, s1.b, s2.b, mode);
+    const int o3 = mode == PredicateMode::Eps ? orientation(s2.a, s2.b, s1.a) : orient2d(s2.a, s2.b, s1.a, mode);
+    const int o4 = mode == PredicateMode::Eps ? orientation(s2.a, s2.b, s1.b) : orient2d(s2.a, s2.b, s1.b, mode);
 
     if (o1 == 0 && o2 == 0 && o3 == 0 && o4 == 0) {
         std::array<Point2D, 2> p1{s1.a, s1.b};
         std::array<Point2D, 2> p2{s2.a, s2.b};
-        std::sort(p1.begin(), p1.end());
-        std::sort(p2.begin(), p2.end());
-        const Point2D start = std::max(p1[0], p2[0]);
-        const Point2D end = std::min(p1[1], p2[1]);
-        if (end < start && !equals(start, end)) return result;
-        if (equals(start, end)) {
+        const auto lessPoint = [mode](const Point2D& a, const Point2D& b) {
+            return pointLessByMode(a, b, mode);
+        };
+        std::sort(p1.begin(), p1.end(), lessPoint);
+        std::sort(p2.begin(), p2.end(), lessPoint);
+        const Point2D start = lessPoint(p1[0], p2[0]) ? p2[0] : p1[0];
+        const Point2D end = lessPoint(p1[1], p2[1]) ? p1[1] : p2[1];
+        if (lessPoint(end, start) && !pointEqualsByMode(start, end, mode)) return result;
+        if (pointEqualsByMode(start, end, mode)) {
             result.type = IntersectionType::Point;
             result.point = start;
         } else {
@@ -250,20 +294,22 @@ inline SegmentIntersectionResult segmentIntersection(const Segment2D& s1, const 
         return result;
     }
 
-    if ((o1 == 0 && s1.contains(s2.a)) || (o2 == 0 && s1.contains(s2.b)) ||
-        (o3 == 0 && s2.contains(s1.a)) || (o4 == 0 && s2.contains(s1.b)) ||
+    if ((o1 == 0 && segmentContainsPoint(s1, s2.a, mode)) || (o2 == 0 && segmentContainsPoint(s1, s2.b, mode)) ||
+        (o3 == 0 && segmentContainsPoint(s2, s1.a, mode)) || (o4 == 0 && segmentContainsPoint(s2, s1.b, mode)) ||
         (o1 * o2 < 0 && o3 * o4 < 0)) {
         result.type = IntersectionType::Point;
-        const auto p = lineIntersection(Line2D::fromPoints(s1.a, s1.b), Line2D::fromPoints(s2.a, s2.b));
+        const auto p = mode == PredicateMode::Eps
+            ? lineIntersection(Line2D::fromPoints(s1.a, s1.b), Line2D::fromPoints(s2.a, s2.b))
+            : lineIntersectionRaw(Line2D::fromPoints(s1.a, s1.b), Line2D::fromPoints(s2.a, s2.b));
         if (p.has_value()) {
             result.point = *p;
-        } else if (s1.contains(s2.a)) {
+        } else if (segmentContainsPoint(s1, s2.a, mode)) {
             result.point = s2.a;
-        } else if (s1.contains(s2.b)) {
+        } else if (segmentContainsPoint(s1, s2.b, mode)) {
             result.point = s2.b;
-        } else if (s2.contains(s1.a)) {
+        } else if (segmentContainsPoint(s2, s1.a, mode)) {
             result.point = s1.a;
-        } else if (s2.contains(s1.b)) {
+        } else if (segmentContainsPoint(s2, s1.b, mode)) {
             result.point = s1.b;
         }
     }
@@ -621,32 +667,149 @@ struct SegmentIntersectionSearchResult {
     std::vector<SegmentIntersectionPair> pairs;
     std::vector<TraceStep> trace;
     std::vector<std::string> warnings;
+    std::size_t eventCount = 0;
+    std::string implementation = "unknown";
+    PredicateMode predicateMode = PredicateMode::FilteredExact;
 };
 
-inline SegmentIntersectionSearchResult findSegmentIntersections(const std::vector<Segment2D>& segments, const AlgorithmOptions& options = {}) {
+inline void sortSegmentIntersectionPairs(std::vector<SegmentIntersectionPair>& pairs) {
+    std::sort(pairs.begin(), pairs.end(), [](const SegmentIntersectionPair& a, const SegmentIntersectionPair& b) {
+        if (a.first != b.first) return a.first < b.first;
+        return a.second < b.second;
+    });
+}
+
+inline SegmentIntersectionSearchResult bruteForceSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options = {},
+    PredicateMode mode = PredicateMode::FilteredExact) {
     SegmentIntersectionSearchResult result;
+    result.implementation = "brute_force";
+    result.predicateMode = mode;
     int step = 0;
-    if (options.trace) {
-        std::vector<Point2D> events;
-        for (const auto& s : segments) {
-            events.push_back(std::min(s.a, s.b));
-            events.push_back(std::max(s.a, s.b));
-        }
-        std::sort(events.begin(), events.end());
-        result.trace.push_back({step++, "events_sorted", "Prepared sweep-line endpoint events.", events, segments, {}, {{"event_count", static_cast<double>(events.size())}}});
-    }
+    result.eventCount = segments.size() * (segments.size() > 0 ? segments.size() - 1 : 0) / 2;
     for (std::size_t i = 0; i < segments.size(); ++i) {
-        if (segments[i].isPoint()) result.warnings.push_back("zero_length_segment");
+        if (segmentIsPointByMode(segments[i], mode)) result.warnings.push_back("zero_length_segment");
         for (std::size_t j = i + 1; j < segments.size(); ++j) {
-            const auto inter = segmentIntersection(segments[i], segments[j]);
-            if (options.trace) result.trace.push_back({step++, "neighbor_check", "Checked candidate segment pair.", {}, {segments[i], segments[j]}, {}, {{"first", static_cast<double>(i)}, {"second", static_cast<double>(j)}, {"intersects", inter.type == IntersectionType::None ? 0.0 : 1.0}}});
+            const auto inter = segmentIntersection(segments[i], segments[j], mode);
+            if (options.trace) result.trace.push_back({step++, "candidate_check", "Checked brute-force segment pair.", {}, {segments[i], segments[j]}, {}, {{"first", static_cast<double>(i)}, {"second", static_cast<double>(j)}, {"intersects", inter.type == IntersectionType::None ? 0.0 : 1.0}}});
             if (inter.type != IntersectionType::None) {
                 result.hasIntersection = true;
                 result.pairs.push_back({static_cast<int>(i), static_cast<int>(j), inter});
             }
         }
     }
+    sortSegmentIntersectionPairs(result.pairs);
     return result;
+}
+
+inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options = {},
+    PredicateMode mode = PredicateMode::FilteredExact) {
+    SegmentIntersectionSearchResult result;
+    result.implementation = "sweep_line_active_set";
+    result.predicateMode = mode;
+    int step = 0;
+
+    struct Event {
+        double x = 0.0;
+        double y = 0.0;
+        int segment = -1;
+        bool start = true;
+    };
+
+    std::vector<Event> events;
+    events.reserve(segments.size() * 2);
+    auto endpointLess = [](const Point2D& a, const Point2D& b) {
+        if (a.x != b.x) return a.x < b.x;
+        return a.y < b.y;
+    };
+    for (std::size_t i = 0; i < segments.size(); ++i) {
+        if (segmentIsPointByMode(segments[i], mode)) result.warnings.push_back("zero_length_segment");
+        Point2D left = segments[i].a;
+        Point2D right = segments[i].b;
+        if (endpointLess(right, left)) std::swap(left, right);
+        events.push_back({left.x, left.y, static_cast<int>(i), true});
+        events.push_back({right.x, right.y, static_cast<int>(i), false});
+    }
+    std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
+        if (a.x != b.x) return a.x < b.x;
+        if (a.start != b.start) return a.start && !b.start;
+        if (a.y != b.y) return a.y < b.y;
+        return a.segment < b.segment;
+    });
+    result.eventCount = events.size();
+
+    if (options.trace) {
+        std::vector<Point2D> eventPoints;
+        eventPoints.reserve(events.size());
+        for (const auto& event : events) {
+            eventPoints.push_back({event.x, event.y});
+        }
+        result.trace.push_back({step++, "events_sorted", "Prepared sweep-line endpoint events.", eventPoints, segments, {}, {{"event_count", static_cast<double>(events.size())}}});
+    }
+
+    std::vector<int> active;
+    std::set<std::pair<int, int>> checked;
+    std::set<std::pair<int, int>> reported;
+
+    auto checkPair = [&](int a, int b) {
+        if (a == b) return;
+        if (a > b) std::swap(a, b);
+        const auto key = std::make_pair(a, b);
+        if (!checked.insert(key).second) return;
+        const auto inter = segmentIntersection(segments[a], segments[b], mode);
+        if (options.trace) result.trace.push_back({step++, "candidate_check", "Checked active sweep-line segment pair.", {}, {segments[a], segments[b]}, {}, {{"first", static_cast<double>(a)}, {"second", static_cast<double>(b)}, {"intersects", inter.type == IntersectionType::None ? 0.0 : 1.0}}});
+        if (inter.type != IntersectionType::None && reported.insert(key).second) {
+            result.hasIntersection = true;
+            result.pairs.push_back({a, b, inter});
+        }
+    };
+
+    for (std::size_t i = 0; i < events.size();) {
+        const double sweepX = events[i].x;
+        std::vector<int> starting;
+        std::vector<int> ending;
+        while (i < events.size() && events[i].x == sweepX) {
+            if (events[i].start) starting.push_back(events[i].segment);
+            else ending.push_back(events[i].segment);
+            ++i;
+        }
+
+        for (std::size_t a = 0; a < starting.size(); ++a) {
+            for (int activeSegment : active) {
+                checkPair(starting[a], activeSegment);
+            }
+            for (std::size_t b = 0; b < a; ++b) {
+                checkPair(starting[a], starting[b]);
+            }
+        }
+
+        for (int segment : starting) {
+            if (std::find(active.begin(), active.end(), segment) == active.end()) {
+                active.push_back(segment);
+            }
+        }
+
+        for (int segment : ending) {
+            active.erase(std::remove(active.begin(), active.end(), segment), active.end());
+        }
+
+        if (options.trace) {
+            result.trace.push_back({step++, "sweep_x_complete", "Processed all endpoint events at one x-coordinate.", {}, {}, {}, {{"x", sweepX}, {"active_count", static_cast<double>(active.size())}}});
+        }
+    }
+
+    sortSegmentIntersectionPairs(result.pairs);
+    return result;
+}
+
+inline SegmentIntersectionSearchResult findSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options = {},
+    PredicateMode mode = PredicateMode::FilteredExact) {
+    return sweepLineSegmentIntersections(segments, options, mode);
 }
 
 inline bool hasAnySegmentIntersection(const std::vector<Segment2D>& segments) {
