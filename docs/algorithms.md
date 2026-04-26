@@ -4,7 +4,8 @@
 
 `convexHullAndrew(points, options)` implements Andrew monotone chain. It removes
 duplicate points, handles empty/single/two-point inputs, detects all-collinear inputs,
-and supports `keepCollinear`.
+and supports `keepCollinear`. Orientation and duplicate policies use
+`options.predicates`.
 
 `convexHullGraham(points, options)` is exposed as a compatibility entry point and
 currently delegates to the same robust hull implementation.
@@ -21,6 +22,9 @@ returns corners, area, width, height, and angle.
 implementation and returns all intersecting segment pairs with `None`, `Point`, or
 `Overlap` classification. The trace records sorted endpoint events, active-set candidate
 checks, and per-x sweep progress.
+
+The preferred C++ path is `options.predicates`; the `predicateMode` overload is retained
+for compatibility.
 
 `bruteForceSegmentIntersections(segments, options, predicateMode)` is retained as a
 correctness oracle for tests and benchmarks.
@@ -40,25 +44,29 @@ incircle determinant to zero.
 `halfPlaneIntersection(halfPlanes, options)` clips a configurable bounding box by each
 half-plane. This gives stable visualization behavior for bounded and unbounded regions.
 Unbounded results are reported when the final polygon touches the configured bounding
-box.
+box. Half-plane side tests use `options.predicates`.
 
 ## Closest Pair
 
 `closestPair(points, options)` implements divide-and-conquer closest pair with duplicate
-detection. Duplicate points immediately return distance `0`.
+detection through `options.predicates`. Duplicate points immediately return distance
+`0`; distances are still double values.
 
 ## Polygon Clipping
 
 `sutherlandHodgmanClip(subject, clipper, options)` clips a subject polygon against a
 convex clipper. The trace records the intermediate polygon after every clip edge.
+Boundary and clip-side tests use `options.predicates`.
 
 ## Ear Clipping Triangulation
 
 `triangulateEarClipping(polygon, options)` normalizes polygon orientation, removes
 duplicate and collinear vertices, rejects self-intersections, and clips ears until the
-polygon is triangulated.
+polygon is triangulated. Ear orientation and point-in-triangle tests use
+`options.predicates`.
 
 ## Experimental Delaunay
 
 `delaunayTriangulation(points, options)` implements a Bowyer-Watson prototype. It is
-useful for visualization and portfolio discussion, but remains marked experimental.
+useful for visualization and portfolio discussion, but remains marked experimental. The
+cavity test uses `PredicateContext::incircle`; topology validation is still limited.

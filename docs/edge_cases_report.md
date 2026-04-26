@@ -10,7 +10,7 @@ so documentation, demos, and test data stay aligned.
 | ----------------------- | ----: | ------------------------------------------------------------------------------------------------------- |
 | Convex hull             |     7 | empty input, small input, duplicates, all-collinear sets, interior points                               |
 | Rotating calipers       |     7 | degenerate hulls, rectangles, rotated hulls, duplicate points                                           |
-| Segment intersection    |     7 | crossing, endpoint touch, overlap, parallel disjoint, zero-length, near-collinear                       |
+| Segment intersection    |     8 | crossing, endpoint touch, overlap, parallel disjoint, zero-length, near-collinear, predicate modes      |
 | Half-plane intersection |     7 | bounded result, empty result, unbounded clipping, duplicate planes, large coordinates, degenerate line  |
 | Polygon clipping        |     7 | inside, outside, partial overlap, boundary vertex, shared edge, degenerate line, concave subject        |
 | Closest pair            |     7 | duplicate points, tiny distance, large coordinates, grid ties, negative coordinates, insufficient input |
@@ -53,6 +53,7 @@ so documentation, demos, and test data stay aligned.
 | `segment_parallel_disjoint`      | parallel separate segments             | no intersection                |
 | `segment_zero_length_on_segment` | zero-length segment on another segment | point intersection             |
 | `segment_nearly_collinear`       | nearly collinear under EPS             | stable overlap classification  |
+| `segment_nearly_collinear_filtered_exact` | near-parallel under exact predicates | no false overlap               |
 
 Representative JSON:
 

@@ -31,6 +31,16 @@ Filtered predicates take the fast double path when the sign is numerically separ
 from zero, then fall back to dependency-free exact dyadic arithmetic for finite
 IEEE-754 `double` inputs.
 
+`PredicateContext` is the preferred way to pass this policy through algorithms:
+
+```cpp
+PredicateContext predicates{PredicateMode::FilteredExact, 1e-9};
+AlgorithmOptions options;
+options.predicates = predicates;
+```
+
+The CLI accepts `predicate_mode` and `predicate_eps` for predicate-aware algorithms.
+
 ## Equality vs Ordering
 
 `Point2D::operator==` uses EPS-based equality because geometric inputs often contain
@@ -193,9 +203,10 @@ triangles.
 
 ## Known Limits
 
-- Most legacy algorithms still use EPS-based predicates unless explicitly documented.
-- Exact predicates currently cover `orient2d` and `incircle`; they are not yet threaded
-  through every algorithm.
+- See [known_limitations.md](known_limitations.md) for the current project-wide list.
+- Some floating-point computations, such as distances, areas, and intersection
+  coordinates, remain double-based even when predicate signs use exact arithmetic.
+- Exact predicates currently cover `orient2d` and `incircle`.
 - Segment intersection uses an event-based active-set sweep and exact predicate
   classification, with brute force retained as an oracle. Degenerate collinear overlaps
   are reported pairwise rather than merged into a topology graph.

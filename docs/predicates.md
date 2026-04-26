@@ -19,6 +19,9 @@ GeoKernel-Lite separates legacy EPS predicates from the P0 exact predicate layer
 - `FilteredExact`
 - `Exact`
 
+`PredicateContext` packages the selected mode and EPS value and is available through
+`AlgorithmOptions::predicates`.
+
 ## Semantics
 
 `Eps` uses the project-wide `1e-9` tolerance. This is useful for legacy behavior and

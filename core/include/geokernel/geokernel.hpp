@@ -17,6 +17,11 @@
 
 namespace geokernel {
 
+// TODO(architecture): The implementation still lives in this umbrella header for
+// source compatibility. New module headers under geokernel/core, geokernel/trace,
+// geokernel/io, and geokernel/algorithm expose stable include paths while the
+// implementation is gradually split in future milestones.
+
 constexpr double EPS = 1e-9;
 
 inline int sign(double x, double eps = EPS) {
@@ -67,6 +72,60 @@ inline Point2D operator*(double scalar, const Point2D& p) {
 
 inline bool equals(const Point2D& a, const Point2D& b, double eps = EPS) {
     return equals(a.x, b.x, eps) && equals(a.y, b.y, eps);
+}
+
+struct PredicateContext {
+    PredicateMode mode = PredicateMode::FilteredExact;
+    double eps = EPS;
+
+    int orient(const Point2D& a, const Point2D& b, const Point2D& c) const {
+        switch (mode) {
+            case PredicateMode::Eps: return orient2dEps(a, b, c, eps);
+            case PredicateMode::FilteredExact: return orient2dFiltered(a, b, c);
+            case PredicateMode::Exact: return orient2dExact(a, b, c);
+        }
+        return orient2dFiltered(a, b, c);
+    }
+
+    int incircle(const Point2D& a, const Point2D& b, const Point2D& c, const Point2D& d) const {
+        switch (mode) {
+            case PredicateMode::Eps: return incircleEps(a, b, c, d, eps);
+            case PredicateMode::FilteredExact: return incircleFiltered(a, b, c, d);
+            case PredicateMode::Exact: return incircleExact(a, b, c, d);
+        }
+        return incircleFiltered(a, b, c, d);
+    }
+
+    bool equals(const Point2D& a, const Point2D& b) const {
+        if (mode == PredicateMode::Eps) return geokernel::equals(a, b, eps);
+        return a.x == b.x && a.y == b.y;
+    }
+
+    int compareLexicographic(const Point2D& a, const Point2D& b) const {
+        if (equals(a, b)) return 0;
+        if (a.x < b.x || (a.x == b.x && a.y < b.y)) return -1;
+        return 1;
+    }
+};
+
+inline PredicateContext epsPredicateContext(double eps = EPS) {
+    return {PredicateMode::Eps, eps};
+}
+
+inline PredicateContext filteredExactPredicateContext(double eps = EPS) {
+    return {PredicateMode::FilteredExact, eps};
+}
+
+inline PredicateContext exactPredicateContext(double eps = EPS) {
+    return {PredicateMode::Exact, eps};
+}
+
+inline PredicateContext predicateContextFromMode(PredicateMode mode, double eps = EPS) {
+    return {mode, eps};
+}
+
+inline PredicateContext predicateContextFromString(const std::string& value, double eps = EPS) {
+    return predicateContextFromMode(predicateModeFromString(value), eps);
 }
 
 inline double dot(const Vector2D& a, const Vector2D& b) {
@@ -210,14 +269,26 @@ inline bool pointEqualsByMode(const Point2D& a, const Point2D& b, PredicateMode 
     return mode == PredicateMode::Eps ? equals(a, b) : (a.x == b.x && a.y == b.y);
 }
 
+inline bool pointEqualsByContext(const Point2D& a, const Point2D& b, const PredicateContext& predicates) {
+    return predicates.equals(a, b);
+}
+
 inline bool segmentIsPointByMode(const Segment2D& s, PredicateMode mode) {
     return pointEqualsByMode(s.a, s.b, mode);
+}
+
+inline bool segmentIsPointByContext(const Segment2D& s, const PredicateContext& predicates) {
+    return predicates.equals(s.a, s.b);
 }
 
 inline bool pointLessByMode(const Point2D& a, const Point2D& b, PredicateMode mode) {
     if (mode == PredicateMode::Eps && equals(a, b)) return false;
     if (a.x != b.x) return a.x < b.x;
     return a.y < b.y;
+}
+
+inline bool pointLessByContext(const Point2D& a, const Point2D& b, const PredicateContext& predicates) {
+    return predicates.compareLexicographic(a, b) < 0;
 }
 
 inline bool coordinateBetween(double lo, double value, double hi, PredicateMode mode) {
@@ -229,11 +300,26 @@ inline bool coordinateBetween(double lo, double value, double hi, PredicateMode 
     return minValue <= value && value <= maxValue;
 }
 
+inline bool coordinateBetween(double lo, double value, double hi, const PredicateContext& predicates) {
+    const double minValue = std::min(lo, hi);
+    const double maxValue = std::max(lo, hi);
+    if (predicates.mode == PredicateMode::Eps) {
+        return lessOrEqual(minValue, value, predicates.eps) && lessOrEqual(value, maxValue, predicates.eps);
+    }
+    return minValue <= value && value <= maxValue;
+}
+
 inline bool segmentContainsPoint(const Segment2D& s, const Point2D& p, PredicateMode mode) {
     if (mode == PredicateMode::Eps) return s.contains(p);
     return orient2d(s.a, s.b, p, mode) == 0 &&
            coordinateBetween(s.a.x, p.x, s.b.x, mode) &&
            coordinateBetween(s.a.y, p.y, s.b.y, mode);
+}
+
+inline bool segmentContainsPoint(const Segment2D& s, const Point2D& p, const PredicateContext& predicates) {
+    return predicates.orient(s.a, s.b, p) == 0 &&
+           coordinateBetween(s.a.x, p.x, s.b.x, predicates) &&
+           coordinateBetween(s.a.y, p.y, s.b.y, predicates);
 }
 
 inline std::optional<Point2D> lineIntersectionRaw(const Line2D& a, const Line2D& b) {
@@ -242,49 +328,49 @@ inline std::optional<Point2D> lineIntersectionRaw(const Line2D& a, const Line2D&
     return a.p + a.dir * (cross(b.p - a.p, b.dir) / denom);
 }
 
-inline SegmentIntersectionResult segmentIntersection(const Segment2D& s1, const Segment2D& s2, PredicateMode mode = PredicateMode::Eps) {
+inline SegmentIntersectionResult segmentIntersection(const Segment2D& s1, const Segment2D& s2, const PredicateContext& predicates) {
     SegmentIntersectionResult result;
-    const bool s1Point = segmentIsPointByMode(s1, mode);
-    const bool s2Point = segmentIsPointByMode(s2, mode);
+    const bool s1Point = segmentIsPointByContext(s1, predicates);
+    const bool s2Point = segmentIsPointByContext(s2, predicates);
     if (s1Point && s2Point) {
-        if (pointEqualsByMode(s1.a, s2.a, mode)) {
+        if (pointEqualsByContext(s1.a, s2.a, predicates)) {
             result.type = IntersectionType::Point;
             result.point = s1.a;
         }
         return result;
     }
     if (s1Point) {
-        if (segmentContainsPoint(s2, s1.a, mode)) {
+        if (segmentContainsPoint(s2, s1.a, predicates)) {
             result.type = IntersectionType::Point;
             result.point = s1.a;
         }
         return result;
     }
     if (s2Point) {
-        if (segmentContainsPoint(s1, s2.a, mode)) {
+        if (segmentContainsPoint(s1, s2.a, predicates)) {
             result.type = IntersectionType::Point;
             result.point = s2.a;
         }
         return result;
     }
 
-    const int o1 = mode == PredicateMode::Eps ? orientation(s1.a, s1.b, s2.a) : orient2d(s1.a, s1.b, s2.a, mode);
-    const int o2 = mode == PredicateMode::Eps ? orientation(s1.a, s1.b, s2.b) : orient2d(s1.a, s1.b, s2.b, mode);
-    const int o3 = mode == PredicateMode::Eps ? orientation(s2.a, s2.b, s1.a) : orient2d(s2.a, s2.b, s1.a, mode);
-    const int o4 = mode == PredicateMode::Eps ? orientation(s2.a, s2.b, s1.b) : orient2d(s2.a, s2.b, s1.b, mode);
+    const int o1 = predicates.orient(s1.a, s1.b, s2.a);
+    const int o2 = predicates.orient(s1.a, s1.b, s2.b);
+    const int o3 = predicates.orient(s2.a, s2.b, s1.a);
+    const int o4 = predicates.orient(s2.a, s2.b, s1.b);
 
     if (o1 == 0 && o2 == 0 && o3 == 0 && o4 == 0) {
         std::array<Point2D, 2> p1{s1.a, s1.b};
         std::array<Point2D, 2> p2{s2.a, s2.b};
-        const auto lessPoint = [mode](const Point2D& a, const Point2D& b) {
-            return pointLessByMode(a, b, mode);
+        const auto lessPoint = [&predicates](const Point2D& a, const Point2D& b) {
+            return pointLessByContext(a, b, predicates);
         };
         std::sort(p1.begin(), p1.end(), lessPoint);
         std::sort(p2.begin(), p2.end(), lessPoint);
         const Point2D start = lessPoint(p1[0], p2[0]) ? p2[0] : p1[0];
         const Point2D end = lessPoint(p1[1], p2[1]) ? p1[1] : p2[1];
-        if (lessPoint(end, start) && !pointEqualsByMode(start, end, mode)) return result;
-        if (pointEqualsByMode(start, end, mode)) {
+        if (lessPoint(end, start) && !pointEqualsByContext(start, end, predicates)) return result;
+        if (pointEqualsByContext(start, end, predicates)) {
             result.type = IntersectionType::Point;
             result.point = start;
         } else {
@@ -294,26 +380,30 @@ inline SegmentIntersectionResult segmentIntersection(const Segment2D& s1, const 
         return result;
     }
 
-    if ((o1 == 0 && segmentContainsPoint(s1, s2.a, mode)) || (o2 == 0 && segmentContainsPoint(s1, s2.b, mode)) ||
-        (o3 == 0 && segmentContainsPoint(s2, s1.a, mode)) || (o4 == 0 && segmentContainsPoint(s2, s1.b, mode)) ||
+    if ((o1 == 0 && segmentContainsPoint(s1, s2.a, predicates)) || (o2 == 0 && segmentContainsPoint(s1, s2.b, predicates)) ||
+        (o3 == 0 && segmentContainsPoint(s2, s1.a, predicates)) || (o4 == 0 && segmentContainsPoint(s2, s1.b, predicates)) ||
         (o1 * o2 < 0 && o3 * o4 < 0)) {
         result.type = IntersectionType::Point;
-        const auto p = mode == PredicateMode::Eps
+        const auto p = predicates.mode == PredicateMode::Eps
             ? lineIntersection(Line2D::fromPoints(s1.a, s1.b), Line2D::fromPoints(s2.a, s2.b))
             : lineIntersectionRaw(Line2D::fromPoints(s1.a, s1.b), Line2D::fromPoints(s2.a, s2.b));
         if (p.has_value()) {
             result.point = *p;
-        } else if (segmentContainsPoint(s1, s2.a, mode)) {
+        } else if (segmentContainsPoint(s1, s2.a, predicates)) {
             result.point = s2.a;
-        } else if (segmentContainsPoint(s1, s2.b, mode)) {
+        } else if (segmentContainsPoint(s1, s2.b, predicates)) {
             result.point = s2.b;
-        } else if (segmentContainsPoint(s2, s1.a, mode)) {
+        } else if (segmentContainsPoint(s2, s1.a, predicates)) {
             result.point = s1.a;
-        } else if (segmentContainsPoint(s2, s1.b, mode)) {
+        } else if (segmentContainsPoint(s2, s1.b, predicates)) {
             result.point = s1.b;
         }
     }
     return result;
+}
+
+inline SegmentIntersectionResult segmentIntersection(const Segment2D& s1, const Segment2D& s2, PredicateMode mode = PredicateMode::Eps) {
+    return segmentIntersection(s1, s2, predicateContextFromMode(mode));
 }
 
 inline bool segmentsIntersect(const Segment2D& a, const Segment2D& b) {
@@ -381,25 +471,33 @@ struct Polygon2D {
     }
 
     PointInPolygonResult containsPoint(const Point2D& p) const {
+        return containsPoint(p, epsPredicateContext());
+    }
+
+    PointInPolygonResult containsPoint(const Point2D& p, const PredicateContext& predicates) const {
         if (vertices.empty()) return PointInPolygonResult::Outside;
         bool inside = false;
         for (std::size_t i = 0, j = vertices.size() - 1; i < vertices.size(); j = i++) {
             const Point2D& a = vertices[j];
             const Point2D& b = vertices[i];
-            if (Segment2D{a, b}.contains(p)) return PointInPolygonResult::OnBoundary;
+            if (segmentContainsPoint(Segment2D{a, b}, p, predicates)) return PointInPolygonResult::OnBoundary;
             if ((a.y > p.y) != (b.y > p.y)) {
                 const double xAtY = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
-                if (xAtY > p.x + EPS) inside = !inside;
+                if (xAtY > p.x + predicates.eps) inside = !inside;
             }
         }
         return inside ? PointInPolygonResult::Inside : PointInPolygonResult::Outside;
     }
 
     bool isConvex() const {
+        return isConvex(epsPredicateContext());
+    }
+
+    bool isConvex(const PredicateContext& predicates) const {
         if (vertices.size() < 3) return false;
         int direction = 0;
         for (std::size_t i = 0; i < vertices.size(); ++i) {
-            const int turn = geokernel::orientation(vertices[i], vertices[(i + 1) % vertices.size()], vertices[(i + 2) % vertices.size()]);
+            const int turn = predicates.orient(vertices[i], vertices[(i + 1) % vertices.size()], vertices[(i + 2) % vertices.size()]);
             if (turn == 0) continue;
             if (direction == 0) direction = turn;
             else if (direction != turn) return false;
@@ -416,9 +514,15 @@ struct HalfPlane2D {
     HalfPlane2D(Point2D point, Vector2D direction) : p(point), dir(direction) {}
 
     bool inside(const Point2D& q) const { return sign(cross(dir, q - p)) >= 0; }
+    bool inside(const Point2D& q, const PredicateContext& predicates) const { return predicates.orient(p, p + dir, q) >= 0; }
     std::optional<Point2D> intersection(const Line2D& line) const { return lineIntersection(Line2D{p, dir}, line); }
     double angle() const { return geokernel::angle(dir); }
 };
+
+inline std::vector<Point2D> removeDuplicatePoints(std::vector<Point2D> points, const PredicateContext& predicates);
+inline std::vector<Point2D> removeConsecutiveDuplicatePoints(const std::vector<Point2D>& points, const PredicateContext& predicates);
+inline std::vector<Point2D> removeCollinearVertices(const std::vector<Point2D>& points, const PredicateContext& predicates);
+inline Polygon2D normalizePolygon(Polygon2D polygon, const PredicateContext& predicates);
 
 inline std::vector<Point2D> sortPointsLexicographically(std::vector<Point2D> points) {
     std::sort(points.begin(), points.end());
@@ -426,25 +530,37 @@ inline std::vector<Point2D> sortPointsLexicographically(std::vector<Point2D> poi
 }
 
 inline std::vector<Point2D> removeDuplicatePoints(std::vector<Point2D> points) {
+    return removeDuplicatePoints(std::move(points), epsPredicateContext());
+}
+
+inline std::vector<Point2D> removeDuplicatePoints(std::vector<Point2D> points, const PredicateContext& predicates) {
     std::sort(points.begin(), points.end());
     std::vector<Point2D> unique;
     for (const auto& p : points) {
-        if (unique.empty() || !equals(unique.back(), p)) unique.push_back(p);
+        if (unique.empty() || !predicates.equals(unique.back(), p)) unique.push_back(p);
     }
     return unique;
 }
 
 inline std::vector<Point2D> removeConsecutiveDuplicatePoints(const std::vector<Point2D>& points) {
+    return removeConsecutiveDuplicatePoints(points, epsPredicateContext());
+}
+
+inline std::vector<Point2D> removeConsecutiveDuplicatePoints(const std::vector<Point2D>& points, const PredicateContext& predicates) {
     std::vector<Point2D> result;
     for (const auto& p : points) {
-        if (result.empty() || !equals(result.back(), p)) result.push_back(p);
+        if (result.empty() || !predicates.equals(result.back(), p)) result.push_back(p);
     }
-    if (result.size() > 1 && equals(result.front(), result.back())) result.pop_back();
+    if (result.size() > 1 && predicates.equals(result.front(), result.back())) result.pop_back();
     return result;
 }
 
 inline std::vector<Point2D> removeCollinearVertices(const std::vector<Point2D>& points) {
-    std::vector<Point2D> cleaned = removeConsecutiveDuplicatePoints(points);
+    return removeCollinearVertices(points, epsPredicateContext());
+}
+
+inline std::vector<Point2D> removeCollinearVertices(const std::vector<Point2D>& points, const PredicateContext& predicates) {
+    std::vector<Point2D> cleaned = removeConsecutiveDuplicatePoints(points, predicates);
     bool changed = true;
     while (changed && cleaned.size() >= 3) {
         changed = false;
@@ -453,7 +569,7 @@ inline std::vector<Point2D> removeCollinearVertices(const std::vector<Point2D>& 
             const Point2D& prev = cleaned[(i + cleaned.size() - 1) % cleaned.size()];
             const Point2D& curr = cleaned[i];
             const Point2D& nxt = cleaned[(i + 1) % cleaned.size()];
-            if (orientation(prev, curr, nxt) == 0 && Segment2D{prev, nxt}.contains(curr)) {
+            if (predicates.orient(prev, curr, nxt) == 0 && segmentContainsPoint(Segment2D{prev, nxt}, curr, predicates)) {
                 changed = true;
                 continue;
             }
@@ -470,7 +586,11 @@ inline Polygon2D ensureCounterClockwise(Polygon2D polygon) {
 }
 
 inline Polygon2D normalizePolygon(Polygon2D polygon) {
-    polygon.vertices = removeCollinearVertices(polygon.vertices);
+    return normalizePolygon(std::move(polygon), epsPredicateContext());
+}
+
+inline Polygon2D normalizePolygon(Polygon2D polygon, const PredicateContext& predicates) {
+    polygon.vertices = removeCollinearVertices(polygon.vertices, predicates);
     return ensureCounterClockwise(std::move(polygon));
 }
 
@@ -486,6 +606,7 @@ struct TraceStep {
 
 struct AlgorithmOptions {
     bool trace = false;
+    PredicateContext predicates = filteredExactPredicateContext();
 };
 
 struct ConvexHullOptions : AlgorithmOptions {
@@ -507,17 +628,24 @@ inline double polygonPerimeter(const std::vector<Point2D>& poly) {
     return sum;
 }
 
+inline bool allCollinear(const std::vector<Point2D>& points, const PredicateContext& predicates);
+
 inline bool allCollinear(const std::vector<Point2D>& points) {
+    return allCollinear(points, epsPredicateContext());
+}
+
+inline bool allCollinear(const std::vector<Point2D>& points, const PredicateContext& predicates) {
     if (points.size() < 3) return true;
     for (std::size_t i = 2; i < points.size(); ++i) {
-        if (orientation(points[0], points[1], points[i]) != 0) return false;
+        if (predicates.orient(points[0], points[1], points[i]) != 0) return false;
     }
     return true;
 }
 
 inline ConvexHullResult convexHullAndrew(const std::vector<Point2D>& input, const ConvexHullOptions& options = {}) {
     ConvexHullResult result;
-    std::vector<Point2D> points = removeDuplicatePoints(input);
+    const PredicateContext& predicates = options.predicates;
+    std::vector<Point2D> points = removeDuplicatePoints(input, predicates);
     int step = 0;
     if (options.trace) {
         result.trace.push_back({step++, "sort_unique", "Sorted input points and removed duplicates.", points, {}, {}, {{"input_count", static_cast<double>(input.size())}, {"unique_count", static_cast<double>(points.size())}}});
@@ -527,7 +655,7 @@ inline ConvexHullResult convexHullAndrew(const std::vector<Point2D>& input, cons
         result.perimeter = points.size() == 2 ? 2.0 * distance(points[0], points[1]) : 0.0;
         return result;
     }
-    if (allCollinear(points)) {
+    if (allCollinear(points, predicates)) {
         result.warnings.push_back("all_points_collinear");
         result.hull = options.keepCollinear ? points : std::vector<Point2D>{points.front(), points.back()};
         result.perimeter = result.hull.size() == 2 ? 2.0 * distance(result.hull[0], result.hull[1]) : polygonPerimeter(result.hull);
@@ -538,7 +666,7 @@ inline ConvexHullResult convexHullAndrew(const std::vector<Point2D>& input, cons
     std::vector<Point2D> lower;
     for (const auto& p : points) {
         while (lower.size() >= 2) {
-            const int turn = orientation(lower[lower.size() - 2], lower.back(), p);
+            const int turn = predicates.orient(lower[lower.size() - 2], lower.back(), p);
             if (options.keepCollinear ? turn < 0 : turn <= 0) {
                 if (options.trace) result.trace.push_back({step++, "lower_pop", "Removed non-left turn from lower hull.", {lower.back(), p}, {}, {}, {{"turn", static_cast<double>(turn)}}});
                 lower.pop_back();
@@ -553,7 +681,7 @@ inline ConvexHullResult convexHullAndrew(const std::vector<Point2D>& input, cons
     std::vector<Point2D> upper;
     for (auto it = points.rbegin(); it != points.rend(); ++it) {
         while (upper.size() >= 2) {
-            const int turn = orientation(upper[upper.size() - 2], upper.back(), *it);
+            const int turn = predicates.orient(upper[upper.size() - 2], upper.back(), *it);
             if (options.keepCollinear ? turn < 0 : turn <= 0) {
                 if (options.trace) result.trace.push_back({step++, "upper_pop", "Removed non-left turn from upper hull.", {upper.back(), *it}, {}, {}, {{"turn", static_cast<double>(turn)}}});
                 upper.pop_back();
@@ -681,17 +809,42 @@ inline void sortSegmentIntersectionPairs(std::vector<SegmentIntersectionPair>& p
 
 inline SegmentIntersectionSearchResult bruteForceSegmentIntersections(
     const std::vector<Segment2D>& segments,
-    const AlgorithmOptions& options = {},
-    PredicateMode mode = PredicateMode::FilteredExact) {
+    const AlgorithmOptions& options,
+    const PredicateContext& predicates);
+
+inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options,
+    const PredicateContext& predicates);
+
+inline SegmentIntersectionSearchResult bruteForceSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options = {}) {
+    return bruteForceSegmentIntersections(segments, options, options.predicates);
+}
+
+inline SegmentIntersectionSearchResult bruteForceSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options,
+    PredicateMode mode) {
+    AlgorithmOptions adjusted = options;
+    adjusted.predicates = predicateContextFromMode(mode, options.predicates.eps);
+    return bruteForceSegmentIntersections(segments, adjusted, adjusted.predicates);
+}
+
+inline SegmentIntersectionSearchResult bruteForceSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options,
+    const PredicateContext& predicates) {
     SegmentIntersectionSearchResult result;
     result.implementation = "brute_force";
-    result.predicateMode = mode;
+    result.predicateMode = predicates.mode;
     int step = 0;
     result.eventCount = segments.size() * (segments.size() > 0 ? segments.size() - 1 : 0) / 2;
     for (std::size_t i = 0; i < segments.size(); ++i) {
-        if (segmentIsPointByMode(segments[i], mode)) result.warnings.push_back("zero_length_segment");
+        if (segmentIsPointByContext(segments[i], predicates)) result.warnings.push_back("zero_length_segment");
         for (std::size_t j = i + 1; j < segments.size(); ++j) {
-            const auto inter = segmentIntersection(segments[i], segments[j], mode);
+            const auto inter = segmentIntersection(segments[i], segments[j], predicates);
             if (options.trace) result.trace.push_back({step++, "candidate_check", "Checked brute-force segment pair.", {}, {segments[i], segments[j]}, {}, {{"first", static_cast<double>(i)}, {"second", static_cast<double>(j)}, {"intersects", inter.type == IntersectionType::None ? 0.0 : 1.0}}});
             if (inter.type != IntersectionType::None) {
                 result.hasIntersection = true;
@@ -705,11 +858,26 @@ inline SegmentIntersectionSearchResult bruteForceSegmentIntersections(
 
 inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
     const std::vector<Segment2D>& segments,
-    const AlgorithmOptions& options = {},
-    PredicateMode mode = PredicateMode::FilteredExact) {
+    const AlgorithmOptions& options = {}) {
+    return sweepLineSegmentIntersections(segments, options, options.predicates);
+}
+
+inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options,
+    PredicateMode mode) {
+    AlgorithmOptions adjusted = options;
+    adjusted.predicates = predicateContextFromMode(mode, options.predicates.eps);
+    return sweepLineSegmentIntersections(segments, adjusted, adjusted.predicates);
+}
+
+inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options,
+    const PredicateContext& predicates) {
     SegmentIntersectionSearchResult result;
     result.implementation = "sweep_line_active_set";
-    result.predicateMode = mode;
+    result.predicateMode = predicates.mode;
     int step = 0;
 
     struct Event {
@@ -726,7 +894,7 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
         return a.y < b.y;
     };
     for (std::size_t i = 0; i < segments.size(); ++i) {
-        if (segmentIsPointByMode(segments[i], mode)) result.warnings.push_back("zero_length_segment");
+        if (segmentIsPointByContext(segments[i], predicates)) result.warnings.push_back("zero_length_segment");
         Point2D left = segments[i].a;
         Point2D right = segments[i].b;
         if (endpointLess(right, left)) std::swap(left, right);
@@ -759,7 +927,7 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
         if (a > b) std::swap(a, b);
         const auto key = std::make_pair(a, b);
         if (!checked.insert(key).second) return;
-        const auto inter = segmentIntersection(segments[a], segments[b], mode);
+        const auto inter = segmentIntersection(segments[a], segments[b], predicates);
         if (options.trace) result.trace.push_back({step++, "candidate_check", "Checked active sweep-line segment pair.", {}, {segments[a], segments[b]}, {}, {{"first", static_cast<double>(a)}, {"second", static_cast<double>(b)}, {"intersects", inter.type == IntersectionType::None ? 0.0 : 1.0}}});
         if (inter.type != IntersectionType::None && reported.insert(key).second) {
             result.hasIntersection = true;
@@ -807,9 +975,22 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
 
 inline SegmentIntersectionSearchResult findSegmentIntersections(
     const std::vector<Segment2D>& segments,
-    const AlgorithmOptions& options = {},
-    PredicateMode mode = PredicateMode::FilteredExact) {
+    const AlgorithmOptions& options = {}) {
+    return sweepLineSegmentIntersections(segments, options, options.predicates);
+}
+
+inline SegmentIntersectionSearchResult findSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options,
+    PredicateMode mode) {
     return sweepLineSegmentIntersections(segments, options, mode);
+}
+
+inline SegmentIntersectionSearchResult findSegmentIntersections(
+    const std::vector<Segment2D>& segments,
+    const AlgorithmOptions& options,
+    const PredicateContext& predicates) {
+    return sweepLineSegmentIntersections(segments, options, predicates);
 }
 
 inline bool hasAnySegmentIntersection(const std::vector<Segment2D>& segments) {
@@ -829,14 +1010,20 @@ struct PolygonClipResult {
     std::vector<std::string> warnings;
 };
 
+inline std::vector<Point2D> clipPointsByHalfPlane(const std::vector<Point2D>& subject, const HalfPlane2D& hp, const PredicateContext& predicates);
+
 inline std::vector<Point2D> clipPointsByHalfPlane(const std::vector<Point2D>& subject, const HalfPlane2D& hp) {
+    return clipPointsByHalfPlane(subject, hp, epsPredicateContext());
+}
+
+inline std::vector<Point2D> clipPointsByHalfPlane(const std::vector<Point2D>& subject, const HalfPlane2D& hp, const PredicateContext& predicates) {
     std::vector<Point2D> output;
     if (subject.empty()) return output;
     for (std::size_t i = 0; i < subject.size(); ++i) {
         const Point2D current = subject[i];
         const Point2D previous = subject[(i + subject.size() - 1) % subject.size()];
-        const bool currentInside = hp.inside(current);
-        const bool previousInside = hp.inside(previous);
+        const bool currentInside = hp.inside(current, predicates);
+        const bool previousInside = hp.inside(previous, predicates);
         if (currentInside) {
             if (!previousInside) {
                 auto p = lineIntersection(Line2D::fromPoints(previous, current), Line2D{hp.p, hp.dir});
@@ -848,22 +1035,23 @@ inline std::vector<Point2D> clipPointsByHalfPlane(const std::vector<Point2D>& su
             if (p.has_value()) output.push_back(*p);
         }
     }
-    return removeConsecutiveDuplicatePoints(output);
+    return removeConsecutiveDuplicatePoints(output, predicates);
 }
 
 inline PolygonClipResult sutherlandHodgmanClip(const Polygon2D& subject, const Polygon2D& clipper, const AlgorithmOptions& options = {}) {
     PolygonClipResult result;
-    Polygon2D normalizedClipper = normalizePolygon(clipper);
-    if (!normalizedClipper.isConvex()) result.warnings.push_back("clipper_is_not_convex");
-    std::vector<Point2D> output = removeConsecutiveDuplicatePoints(subject.vertices);
+    const PredicateContext& predicates = options.predicates;
+    Polygon2D normalizedClipper = normalizePolygon(clipper, predicates);
+    if (!normalizedClipper.isConvex(predicates)) result.warnings.push_back("clipper_is_not_convex");
+    std::vector<Point2D> output = removeConsecutiveDuplicatePoints(subject.vertices, predicates);
     int step = 0;
     for (const auto& edge : normalizedClipper.edges()) {
-        output = clipPointsByHalfPlane(output, HalfPlane2D{edge.a, edge.b - edge.a});
+        output = clipPointsByHalfPlane(output, HalfPlane2D{edge.a, edge.b - edge.a}, predicates);
         if (options.trace) result.trace.push_back({step++, "clip_edge", "Clipped subject polygon by one clipper edge.", {}, {edge}, {Polygon2D{output}}, {{"vertex_count", static_cast<double>(output.size())}}});
         if (output.empty()) break;
     }
-    result.polygon = Polygon2D{removeConsecutiveDuplicatePoints(output)};
-    if (result.polygon.vertices.size() < 3 || sign(result.polygon.area()) == 0) {
+    result.polygon = Polygon2D{removeConsecutiveDuplicatePoints(output, predicates)};
+    if (result.polygon.vertices.size() < 3 || sign(result.polygon.area(), predicates.eps) == 0) {
         result.status = result.polygon.vertices.empty() ? PolygonClipStatus::Empty : PolygonClipStatus::Degenerate;
     } else {
         result.status = PolygonClipStatus::Polygon;
@@ -893,27 +1081,28 @@ struct HalfPlaneIntersectionResult {
 
 inline HalfPlaneIntersectionResult halfPlaneIntersection(const std::vector<HalfPlane2D>& halfPlanes, const HalfPlaneIntersectionOptions& options = {}) {
     HalfPlaneIntersectionResult result;
+    const PredicateContext& predicates = options.predicates;
     const double b = options.boundingLimit;
     std::vector<Point2D> poly{{-b, -b}, {b, -b}, {b, b}, {-b, b}};
     int step = 0;
     result.clippedByBoundingBox = options.useBoundingBox;
     for (const auto& hp : halfPlanes) {
-        poly = clipPointsByHalfPlane(poly, hp);
+        poly = clipPointsByHalfPlane(poly, hp, predicates);
         if (options.trace) result.trace.push_back({step++, "halfplane_clip", "Clipped current region by half-plane.", {}, {Segment2D{hp.p, hp.p + hp.dir}}, {Polygon2D{poly}}, {{"vertex_count", static_cast<double>(poly.size())}}});
         if (poly.empty()) break;
     }
-    result.polygon = Polygon2D{removeConsecutiveDuplicatePoints(poly)};
+    result.polygon = Polygon2D{removeConsecutiveDuplicatePoints(poly, predicates)};
     if (result.polygon.vertices.empty()) {
         result.status = HalfPlaneIntersectionStatus::Empty;
         return result;
     }
-    if (result.polygon.vertices.size() < 3 || sign(result.polygon.area()) == 0) {
+    if (result.polygon.vertices.size() < 3 || sign(result.polygon.area(), predicates.eps) == 0) {
         result.status = HalfPlaneIntersectionStatus::Degenerate;
         return result;
     }
     bool touchesBox = false;
     for (const auto& p : result.polygon.vertices) {
-        if (equals(std::fabs(p.x), b, 1e-6) || equals(std::fabs(p.y), b, 1e-6)) {
+        if (equals(std::fabs(p.x), b, std::max(1e-6, predicates.eps)) || equals(std::fabs(p.y), b, std::max(1e-6, predicates.eps))) {
             touchesBox = true;
             break;
         }
@@ -934,14 +1123,17 @@ struct ClosestPairResult {
 
 inline ClosestPairResult closestPair(const std::vector<Point2D>& input, const AlgorithmOptions& options = {}) {
     ClosestPairResult result;
+    const PredicateContext& predicates = options.predicates;
     if (input.size() < 2) {
         result.warnings.push_back("fewer_than_two_points");
         return result;
     }
     std::vector<Point2D> points = input;
-    std::sort(points.begin(), points.end());
+    std::sort(points.begin(), points.end(), [&predicates](const Point2D& a, const Point2D& b) {
+        return predicates.compareLexicographic(a, b) < 0;
+    });
     for (std::size_t i = 1; i < points.size(); ++i) {
-        if (equals(points[i], points[i - 1])) {
+        if (predicates.equals(points[i], points[i - 1])) {
             result.valid = true;
             result.p1 = points[i - 1];
             result.p2 = points[i];
@@ -983,8 +1175,8 @@ inline ClosestPairResult closestPair(const std::vector<Point2D>& input, const Al
         for (const auto& p : pts) {
             if (std::fabs(p.x - midX) < best.distance) strip.push_back(p);
         }
-        std::sort(strip.begin(), strip.end(), [](const Point2D& a, const Point2D& b) {
-            if (!equals(a.y, b.y)) return a.y < b.y;
+        std::sort(strip.begin(), strip.end(), [&predicates](const Point2D& a, const Point2D& b) {
+            if (!equals(a.y, b.y, predicates.eps)) return a.y < b.y;
             return a.x < b.x;
         });
         for (std::size_t i = 0; i < strip.size(); ++i) {
@@ -1007,19 +1199,30 @@ inline ClosestPairResult closestPair(const std::vector<Point2D>& input, const Al
     return result;
 }
 
+inline bool pointInTriangle(const Point2D& p, const Triangle2D& t, const PredicateContext& predicates);
+inline bool isSimplePolygon(const Polygon2D& polygon, const PredicateContext& predicates);
+
 inline bool pointInTriangle(const Point2D& p, const Triangle2D& t) {
-    const int o1 = orientation(t.a, t.b, p);
-    const int o2 = orientation(t.b, t.c, p);
-    const int o3 = orientation(t.c, t.a, p);
+    return pointInTriangle(p, t, epsPredicateContext());
+}
+
+inline bool pointInTriangle(const Point2D& p, const Triangle2D& t, const PredicateContext& predicates) {
+    const int o1 = predicates.orient(t.a, t.b, p);
+    const int o2 = predicates.orient(t.b, t.c, p);
+    const int o3 = predicates.orient(t.c, t.a, p);
     return (o1 >= 0 && o2 >= 0 && o3 >= 0) || (o1 <= 0 && o2 <= 0 && o3 <= 0);
 }
 
 inline bool isSimplePolygon(const Polygon2D& polygon) {
+    return isSimplePolygon(polygon, epsPredicateContext());
+}
+
+inline bool isSimplePolygon(const Polygon2D& polygon, const PredicateContext& predicates) {
     const auto edges = polygon.edges();
     for (std::size_t i = 0; i < edges.size(); ++i) {
         for (std::size_t j = i + 1; j < edges.size(); ++j) {
             if (j == i + 1 || (i == 0 && j + 1 == edges.size())) continue;
-            if (segmentsIntersect(edges[i], edges[j])) return false;
+            if (segmentIntersection(edges[i], edges[j], predicates).type != IntersectionType::None) return false;
         }
     }
     return true;
@@ -1037,14 +1240,15 @@ struct TriangulationResult {
 
 inline TriangulationResult triangulateEarClipping(const Polygon2D& polygon, const AlgorithmOptions& options = {}) {
     TriangulationResult result;
-    Polygon2D poly = normalizePolygon(polygon);
+    const PredicateContext& predicates = options.predicates;
+    Polygon2D poly = normalizePolygon(polygon, predicates);
     result.polygonArea = poly.area();
     int step = 0;
     if (poly.vertices.size() < 3) {
         result.warnings.push_back("fewer_than_three_vertices");
         return result;
     }
-    if (!isSimplePolygon(poly)) {
+    if (!isSimplePolygon(poly, predicates)) {
         result.warnings.push_back("polygon_is_not_simple");
         return result;
     }
@@ -1054,11 +1258,11 @@ inline TriangulationResult triangulateEarClipping(const Polygon2D& polygon, cons
         const int prev = idx[(pos + idx.size() - 1) % idx.size()];
         const int curr = idx[pos];
         const int next = idx[(pos + 1) % idx.size()];
-        if (orientation(poly.vertices[prev], poly.vertices[curr], poly.vertices[next]) <= 0) return false;
+        if (predicates.orient(poly.vertices[prev], poly.vertices[curr], poly.vertices[next]) <= 0) return false;
         Triangle2D tri{poly.vertices[prev], poly.vertices[curr], poly.vertices[next]};
         for (const int id : idx) {
             if (id == prev || id == curr || id == next) continue;
-            if (pointInTriangle(poly.vertices[id], tri)) return false;
+            if (pointInTriangle(poly.vertices[id], tri, predicates)) return false;
         }
         return true;
     };
@@ -1101,7 +1305,18 @@ struct DelaunayResult {
     std::vector<std::string> warnings;
 };
 
+inline bool circumcircleContains(const Triangle2D& t, const Point2D& p, const PredicateContext& predicates);
+
 inline bool circumcircleContains(const Triangle2D& t, const Point2D& p) {
+    return circumcircleContains(t, p, epsPredicateContext());
+}
+
+inline bool circumcircleContains(const Triangle2D& t, const Point2D& p, const PredicateContext& predicates) {
+    if (predicates.mode != PredicateMode::Eps) {
+        const int triOrientation = predicates.orient(t.a, t.b, t.c);
+        const int circle = predicates.incircle(t.a, t.b, t.c, p);
+        return triOrientation >= 0 ? circle > 0 : circle < 0;
+    }
     const double ax = t.a.x - p.x;
     const double ay = t.a.y - p.y;
     const double bx = t.b.x - p.x;
@@ -1111,12 +1326,13 @@ inline bool circumcircleContains(const Triangle2D& t, const Point2D& p) {
     const double det = (ax * ax + ay * ay) * (bx * cy - cx * by) -
                        (bx * bx + by * by) * (ax * cy - cx * ay) +
                        (cx * cx + cy * cy) * (ax * by - bx * ay);
-    return cross(t.a, t.b, t.c) > 0 ? det > EPS : det < -EPS;
+    return cross(t.a, t.b, t.c) > 0 ? det > predicates.eps : det < -predicates.eps;
 }
 
 inline DelaunayResult delaunayTriangulation(const std::vector<Point2D>& input, const AlgorithmOptions& options = {}) {
     DelaunayResult result;
-    std::vector<Point2D> points = removeDuplicatePoints(input);
+    const PredicateContext& predicates = options.predicates;
+    std::vector<Point2D> points = removeDuplicatePoints(input, predicates);
     if (points.size() < 3) {
         result.warnings.push_back("fewer_than_three_unique_points");
         return result;
@@ -1136,14 +1352,14 @@ inline DelaunayResult delaunayTriangulation(const std::vector<Point2D>& input, c
     const Point2D s3{midX + 20.0 * delta, midY - delta};
     std::vector<Triangle2D> triangles{{s1, s2, s3}};
     int step = 0;
-    auto sameEdge = [](const Segment2D& a, const Segment2D& b) {
-        return (equals(a.a, b.a) && equals(a.b, b.b)) || (equals(a.a, b.b) && equals(a.b, b.a));
+    auto sameEdge = [&predicates](const Segment2D& a, const Segment2D& b) {
+        return (predicates.equals(a.a, b.a) && predicates.equals(a.b, b.b)) || (predicates.equals(a.a, b.b) && predicates.equals(a.b, b.a));
     };
     for (const auto& p : points) {
         std::vector<Triangle2D> bad;
         std::vector<Triangle2D> kept;
         for (const auto& tri : triangles) {
-            if (circumcircleContains(tri, p)) bad.push_back(tri);
+            if (circumcircleContains(tri, p, predicates)) bad.push_back(tri);
             else kept.push_back(tri);
         }
         std::vector<Segment2D> edges;
@@ -1166,15 +1382,15 @@ inline DelaunayResult delaunayTriangulation(const std::vector<Point2D>& input, c
         triangles = kept;
         for (const auto& e : boundary) {
             Triangle2D tri{e.a, e.b, p};
-            if (tri.signedArea() < 0) std::swap(tri.a, tri.b);
+            if (predicates.orient(tri.a, tri.b, tri.c) < 0) std::swap(tri.a, tri.b);
             triangles.push_back(tri);
         }
         if (options.trace) result.trace.push_back({step++, "insert_point", "Inserted point and rebuilt Delaunay cavity.", {p}, boundary, {}, {{"bad_triangles", static_cast<double>(bad.size())}, {"boundary_edges", static_cast<double>(boundary.size())}}});
     }
     for (const auto& tri : triangles) {
-        if (equals(tri.a, s1) || equals(tri.a, s2) || equals(tri.a, s3) ||
-            equals(tri.b, s1) || equals(tri.b, s2) || equals(tri.b, s3) ||
-            equals(tri.c, s1) || equals(tri.c, s2) || equals(tri.c, s3)) {
+        if (predicates.equals(tri.a, s1) || predicates.equals(tri.a, s2) || predicates.equals(tri.a, s3) ||
+            predicates.equals(tri.b, s1) || predicates.equals(tri.b, s2) || predicates.equals(tri.b, s3) ||
+            predicates.equals(tri.c, s1) || predicates.equals(tri.c, s2) || predicates.equals(tri.c, s3)) {
             continue;
         }
         result.triangles.push_back(tri);
@@ -1183,3 +1399,26 @@ inline DelaunayResult delaunayTriangulation(const std::vector<Point2D>& input, c
 }
 
 }  // namespace geokernel
+
+#include "geokernel/core/constants.hpp"
+#include "geokernel/core/types.hpp"
+#include "geokernel/core/predicates.hpp"
+#include "geokernel/core/predicate_context.hpp"
+#include "geokernel/core/geometry_utils.hpp"
+#include "geokernel/core/intersections.hpp"
+#include "geokernel/core/polygon.hpp"
+#include "geokernel/trace/trace.hpp"
+#include "geokernel/io/json_io.hpp"
+#include "geokernel/algorithm/convex_hull.hpp"
+#include "geokernel/algorithm/rotating_calipers.hpp"
+#include "geokernel/algorithm/segment_intersection.hpp"
+#include "geokernel/algorithm/sweep_line.hpp"
+#include "geokernel/algorithm/half_plane_intersection.hpp"
+#include "geokernel/algorithm/closest_pair.hpp"
+#include "geokernel/algorithm/polygon_clipping.hpp"
+#include "geokernel/algorithm/triangulation.hpp"
+#include "geokernel/algorithm/delaunay.hpp"
+#include "geokernel/experimental/delaunay.hpp"
+#include "geokernel/algorithm/constrained_delaunay.hpp"
+#include "geokernel/algorithm/polygon_boolean.hpp"
+#include "geokernel/algorithm/arrangement.hpp"

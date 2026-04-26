@@ -2,16 +2,48 @@
 
 ## Header-Only Core
 
-The first version keeps the C++ kernel header-only under
-`core/include/geokernel/geokernel.hpp`. Wrapper headers preserve stable include paths
-such as `geokernel/algorithm/convex_hull.hpp`, so the implementation can be split later
-without breaking users.
+The first version kept most C++ implementation in
+`core/include/geokernel/geokernel.hpp`. The current tree now exposes compatibility
+module headers under:
+
+- `geokernel/core/`
+- `geokernel/trace/`
+- `geokernel/io/`
+- `geokernel/algorithm/`
+
+`geokernel.hpp` remains the umbrella header and still includes the public module paths.
+Most algorithm bodies intentionally remain in the umbrella header for now because the
+types, helpers, trace structs, and algorithms are still tightly coupled. This keeps old
+include paths working while creating stable landing zones for future extraction.
+
+The placeholder headers for `arrangement`, `polygon_boolean`, and
+`constrained_delaunay` reserve public include paths only. They do not claim those
+algorithms are implemented.
+
+TODO: move implementation blocks out of `geokernel.hpp` once each module has narrow
+dependencies and dedicated tests.
+
+## Predicate Context
+
+`PredicateContext` centralizes predicate policy:
+
+- `eps`
+- `filtered_exact`
+- `exact`
+
+Algorithms accept this through `AlgorithmOptions::predicates` where possible. Existing
+function names remain available, and direct legacy calls such as `segmentIntersection(a,
+b)` keep their compatibility behavior.
 
 ## CLI + JSON Boundary
 
 Python calls the C++ kernel through `geokernel_demo`. This keeps Streamlit independent
 from C++ ABI and compiler details while still exercising the real algorithm
 implementation.
+
+The CLI accepts optional `predicate_mode` and `predicate_eps` fields for predicate-aware
+algorithms. JSON serialization remains in `apps/geokernel_demo.cpp`; the header-only
+core does not depend on `nlohmann_json`.
 
 ## Trace Shape
 

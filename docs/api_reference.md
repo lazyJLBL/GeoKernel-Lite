@@ -24,6 +24,7 @@ All public C++ symbols live in `namespace geokernel`.
 - `lessOrEqual(double, double)`
 - `orientation(Point2D, Point2D, Point2D)`
 - `PredicateMode`
+- `PredicateContext`
 - `orient2dEps(...)`
 - `orient2dFiltered(...)`
 - `orient2dExact(...)`
@@ -33,6 +34,15 @@ All public C++ symbols live in `namespace geokernel`.
 - `PredicateComparisonResult`
 - `compareOrient2d(...)`
 - `compareIncircle(...)`
+
+`PredicateContext` contains:
+
+- `mode`
+- `eps`
+- `orient(a, b, c)`
+- `incircle(a, b, c, d)`
+- `equals(a, b)`
+- `compareLexicographic(a, b)`
 
 ## Algorithms
 
@@ -72,6 +82,15 @@ Supported algorithm names:
 - `eps`
 - `filtered_exact`
 - `exact`
+
+Predicate-aware algorithm inputs may also include:
+
+```json
+{
+  "predicate_mode": "filtered_exact",
+  "predicate_eps": 1e-9
+}
+```
 
 `predicate_compare` accepts:
 

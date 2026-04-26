@@ -6,7 +6,7 @@ Run the app with:
 streamlit run visualizer/app.py
 ```
 
-Each algorithm tab loads sample cases from `tests/cases/catalog.json`. The input editor
+Each algorithm tab loads sample cases from `tests/cases/*.json`. The input editor
 accepts the same JSON payload used by the C++ CLI. When `geokernel_demo` exists under
 `build/`, the app runs the C++ executable and renders the returned `result` and `trace`.
 
@@ -18,4 +18,4 @@ The trace slider overlays intermediate geometry:
 - per-step metrics in a table
 
 The `Robustness Cases` tab lists the shared JSON boundary catalog used by tests and
-examples.
+examples. Predicate comparison cases can be inspected directly from this tab.

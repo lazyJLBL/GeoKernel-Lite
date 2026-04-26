@@ -162,23 +162,29 @@ const json& payloadOf(const json& root) {
 
 json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnabled) {
     const json& input = payloadOf(root);
+    const double predicateEps = input.value("predicate_eps", input.value("eps", EPS));
+    const PredicateContext predicates = predicateContextFromString(input.value("predicate_mode", "filtered_exact"), predicateEps);
     AlgorithmOptions options;
     options.trace = traceEnabled;
+    options.predicates = predicates;
 
     if (algorithm == "convex_hull" || algorithm == "convex_hull_andrew") {
         ConvexHullOptions hullOptions;
         hullOptions.trace = traceEnabled;
+        hullOptions.predicates = predicates;
         hullOptions.keepCollinear = input.value("keep_collinear", false);
         auto result = convexHullAndrew(parsePoints(input.at("points")), hullOptions);
         json body;
         body["hull"] = polygonJson(Polygon2D{result.hull});
         body["area"] = result.area;
         body["perimeter"] = result.perimeter;
-        return envelope(body, {{"algorithm", "convex_hull"}, {"hull_vertices", result.hull.size()}}, traceJson(result.trace), warningsJson(result.warnings));
+        return envelope(body, {{"algorithm", "convex_hull"}, {"hull_vertices", result.hull.size()}, {"predicate_mode", predicateModeName(predicates.mode)}}, traceJson(result.trace), warningsJson(result.warnings));
     }
 
     if (algorithm == "rotating_calipers") {
-        auto hull = convexHullAndrew(parsePoints(input.at("points"))).hull;
+        ConvexHullOptions hullOptions;
+        hullOptions.predicates = predicates;
+        auto hull = convexHullAndrew(parsePoints(input.at("points")), hullOptions).hull;
         auto diameter = convexDiameter(hull, options);
         auto rectangle = minimumAreaBoundingRectangle(hull, options);
         json body;
@@ -193,12 +199,11 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
         };
         json trace = traceJson(diameter.trace);
         for (const auto& item : traceJson(rectangle.trace)) trace.push_back(item);
-        return envelope(body, {{"algorithm", "rotating_calipers"}, {"hull_vertices", hull.size()}}, trace, json::array());
+        return envelope(body, {{"algorithm", "rotating_calipers"}, {"hull_vertices", hull.size()}, {"predicate_mode", predicateModeName(predicates.mode)}}, trace, json::array());
     }
 
     if (algorithm == "segment_intersection" || algorithm == "sweep_line") {
-        const PredicateMode predicateMode = predicateModeFromString(input.value("predicate_mode", "filtered_exact"));
-        auto result = findSegmentIntersections(parseSegments(input.at("segments")), options, predicateMode);
+        auto result = findSegmentIntersections(parseSegments(input.at("segments")), options, predicates);
         json pairs = json::array();
         for (const auto& pair : result.pairs) {
             pairs.push_back({{"first", pair.first}, {"second", pair.second}, {"intersection", segmentIntersectionJson(pair.intersection)}});
@@ -249,6 +254,7 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
     if (algorithm == "half_plane_intersection") {
         HalfPlaneIntersectionOptions hpOptions;
         hpOptions.trace = traceEnabled;
+        hpOptions.predicates = predicates;
         hpOptions.boundingLimit = input.value("bounding_limit", 1000000.0);
         auto result = halfPlaneIntersection(parseHalfPlanes(input.at("halfplanes")), hpOptions);
         json body = {
@@ -257,7 +263,7 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
             {"area", result.polygon.area()},
             {"clipped_by_bounding_box", result.clippedByBoundingBox}
         };
-        return envelope(body, {{"algorithm", "half_plane_intersection"}, {"vertices", result.polygon.vertices.size()}}, traceJson(result.trace), warningsJson(result.warnings));
+        return envelope(body, {{"algorithm", "half_plane_intersection"}, {"vertices", result.polygon.vertices.size()}, {"predicate_mode", predicateModeName(predicates.mode)}}, traceJson(result.trace), warningsJson(result.warnings));
     }
 
     if (algorithm == "closest_pair") {
@@ -268,7 +274,7 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
             {"p2", pointJson(result.p2)},
             {"distance", result.distance}
         };
-        return envelope(body, {{"algorithm", "closest_pair"}, {"valid", result.valid}}, traceJson(result.trace), warningsJson(result.warnings));
+        return envelope(body, {{"algorithm", "closest_pair"}, {"valid", result.valid}, {"predicate_mode", predicateModeName(predicates.mode)}}, traceJson(result.trace), warningsJson(result.warnings));
     }
 
     if (algorithm == "polygon_clipping") {
@@ -278,7 +284,7 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
             {"polygon", polygonJson(result.polygon)},
             {"area", result.polygon.area()}
         };
-        return envelope(body, {{"algorithm", "polygon_clipping"}, {"vertices", result.polygon.vertices.size()}}, traceJson(result.trace), warningsJson(result.warnings));
+        return envelope(body, {{"algorithm", "polygon_clipping"}, {"vertices", result.polygon.vertices.size()}, {"predicate_mode", predicateModeName(predicates.mode)}}, traceJson(result.trace), warningsJson(result.warnings));
     }
 
     if (algorithm == "triangulation") {
@@ -292,7 +298,7 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
             {"triangles_area", result.trianglesArea},
             {"area_error", result.areaError}
         };
-        return envelope(body, {{"algorithm", "triangulation"}, {"triangle_count", result.triangles.size()}}, traceJson(result.trace), warningsJson(result.warnings));
+        return envelope(body, {{"algorithm", "triangulation"}, {"triangle_count", result.triangles.size()}, {"predicate_mode", predicateModeName(predicates.mode)}}, traceJson(result.trace), warningsJson(result.warnings));
     }
 
     if (algorithm == "delaunay") {
@@ -300,7 +306,7 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
         json triangles = json::array();
         for (const auto& tri : result.triangles) triangles.push_back(triangleJson(tri));
         json body = {{"experimental", true}, {"triangles", triangles}};
-        return envelope(body, {{"algorithm", "delaunay"}, {"triangle_count", result.triangles.size()}}, traceJson(result.trace), warningsJson(result.warnings));
+        return envelope(body, {{"algorithm", "delaunay"}, {"triangle_count", result.triangles.size()}, {"predicate_mode", predicateModeName(predicates.mode)}}, traceJson(result.trace), warningsJson(result.warnings));
     }
 
     throw std::runtime_error("unknown algorithm: " + algorithm);

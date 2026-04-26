@@ -1,8 +1,23 @@
 #include <gtest/gtest.h>
 
 #include <limits>
+#include <random>
 #include <set>
 
+#include "geokernel/core/constants.hpp"
+#include "geokernel/core/types.hpp"
+#include "geokernel/core/predicates.hpp"
+#include "geokernel/core/predicate_context.hpp"
+#include "geokernel/core/geometry_utils.hpp"
+#include "geokernel/core/intersections.hpp"
+#include "geokernel/core/polygon.hpp"
+#include "geokernel/trace/trace.hpp"
+#include "geokernel/io/json_io.hpp"
+#include "geokernel/algorithm/segment_intersection.hpp"
+#include "geokernel/algorithm/delaunay.hpp"
+#include "geokernel/algorithm/constrained_delaunay.hpp"
+#include "geokernel/algorithm/polygon_boolean.hpp"
+#include "geokernel/algorithm/arrangement.hpp"
 #include "geokernel/geokernel.hpp"
 
 using namespace geokernel;
@@ -47,6 +62,21 @@ TEST(PredicateTest, RejectsNonFiniteInputs) {
 
     EXPECT_THROW(orient2dExact(0, 0, inf, 0, 1, 1), std::invalid_argument);
     EXPECT_THROW(incircleFiltered(0, 0, 1, 0, 0, 1, nan, 1), std::invalid_argument);
+}
+
+TEST(PredicateContextTest, RoutesPredicateModesAndComparisons) {
+    const Point2D a{0, 0};
+    const Point2D b{1, 0};
+    const Point2D c{0.5, 1e-12};
+
+    PredicateContext eps = epsPredicateContext();
+    PredicateContext exact = exactPredicateContext();
+
+    EXPECT_EQ(eps.orient(a, b, c), 0);
+    EXPECT_EQ(exact.orient(a, b, c), 1);
+    EXPECT_TRUE(eps.equals({0, 0}, {5e-10, 0}));
+    EXPECT_FALSE(exact.equals({0, 0}, {5e-10, 0}));
+    EXPECT_LT(exact.compareLexicographic({0, 0}, {1, 0}), 0);
 }
 
 TEST(SegmentIntersectionTest, ClassifiesOverlapAndEndpoint) {
@@ -131,6 +161,44 @@ TEST(SweepLineTest, MatchesBruteForceOracleOnDegenerateSet) {
 
     EXPECT_EQ(keys(sweep), keys(brute));
     EXPECT_EQ(sweep.eventCount, segments.size() * 2);
+}
+
+TEST(FuzzTest, SweepMatchesBruteForceOnDeterministicRandomSegments) {
+    std::mt19937 rng(123);
+    std::uniform_real_distribution<double> dist(-10.0, 10.0);
+
+    for (int round = 0; round < 20; ++round) {
+        std::vector<Segment2D> segments;
+        for (int i = 0; i < 12; ++i) {
+            segments.push_back({{dist(rng), dist(rng)}, {dist(rng), dist(rng)}});
+        }
+        const auto sweep = findSegmentIntersections(segments);
+        const auto brute = bruteForceSegmentIntersections(segments);
+        std::set<std::pair<int, int>> sweepPairs;
+        std::set<std::pair<int, int>> brutePairs;
+        for (const auto& pair : sweep.pairs) sweepPairs.insert({pair.first, pair.second});
+        for (const auto& pair : brute.pairs) brutePairs.insert({pair.first, pair.second});
+        EXPECT_EQ(sweepPairs, brutePairs);
+    }
+}
+
+TEST(FuzzTest, ConvexHullContainsDeterministicRandomPoints) {
+    std::mt19937 rng(456);
+    std::uniform_real_distribution<double> dist(-50.0, 50.0);
+
+    for (int round = 0; round < 10; ++round) {
+        std::vector<Point2D> points;
+        for (int i = 0; i < 40; ++i) points.push_back({dist(rng), dist(rng)});
+        ConvexHullOptions options;
+        options.predicates = filteredExactPredicateContext();
+        const auto hull = convexHullAndrew(points, options);
+        ASSERT_GE(hull.hull.size(), 3);
+        Polygon2D hullPolygon{hull.hull};
+        for (const auto& p : points) {
+            const auto location = hullPolygon.containsPoint(p, options.predicates);
+            EXPECT_NE(location, PointInPolygonResult::Outside);
+        }
+    }
 }
 
 TEST(ClippingTest, ClipsConvexWindow) {

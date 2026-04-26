@@ -36,3 +36,22 @@ def test_predicate_compare_cli_contract():
     assert output["summary"]["algorithm"] == "predicate_compare"
     assert output["result"]["eps_differs_from_exact"] is True
     assert output["result"]["filtered_matches_exact"] is True
+
+
+def test_segment_intersection_accepts_predicate_mode():
+    executable = locate_demo_executable()
+    if executable is None:
+        pytest.skip("geokernel_demo executable is not built")
+
+    output = GeoKernelRunner(executable).run(
+        "segment_intersection",
+        {
+            "predicate_mode": "filtered_exact",
+            "segments": [[[0, 0], [2, 0]], [[1, 1e-10], [3, 1e-10]]],
+        },
+        trace=False,
+    )
+
+    assert output["status"] == "ok"
+    assert output["summary"]["predicate_mode"] == "filtered_exact"
+    assert output["result"]["pairs"] == []

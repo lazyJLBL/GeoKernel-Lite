@@ -160,8 +160,9 @@ filtered exact classification.
 
 See [docs/robustness.md](docs/robustness.md) and
 [docs/predicates.md](docs/predicates.md), [docs/sweep_line.md](docs/sweep_line.md), and
-[docs/robustness_failures.md](docs/robustness_failures.md) for the detailed policy,
-boundary-case catalog, and current limitations.
+[docs/robustness_failures.md](docs/robustness_failures.md) for the detailed policy and
+boundary-case catalog. See [docs/known_limitations.md](docs/known_limitations.md) for
+the current non-goals and incomplete industrial-kernel features.
 
 ## Release Status
 
