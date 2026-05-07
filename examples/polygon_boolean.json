@@ -1,0 +1,24 @@
+{
+  "input": {
+    "operation": "union",
+    "fill_rule": "even_odd",
+    "predicate_mode": "filtered_exact",
+    "predicate_eps": 1e-9,
+    "subject": {
+      "polygons": [
+        {
+          "outer": [[0, 0], [4, 0], [4, 4], [0, 4]],
+          "holes": []
+        }
+      ]
+    },
+    "clip": {
+      "polygons": [
+        {
+          "outer": [[2, 2], [6, 2], [6, 6], [2, 6]],
+          "holes": []
+        }
+      ]
+    }
+  }
+}

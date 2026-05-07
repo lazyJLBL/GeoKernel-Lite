@@ -32,6 +32,14 @@ correctness oracle for tests and benchmarks.
 The CLI `segment_intersection` path defaults to `filtered_exact` predicates. Use
 `predicate_mode: "eps"` in the input payload when reproducing legacy EPS behavior.
 
+## Segment Arrangement
+
+`buildSegmentArrangement(segments, options)` builds an arrangement-ready graph from
+segments by collecting crossings and overlap boundaries, splitting each input segment
+into atomic subsegments, deduplicating nodes with `PredicateContext`, and validating
+that atomic edges do not contain unsplit interior intersections. The implementation is
+currently correctness-first and uses the brute-force intersection oracle.
+
 ## Predicate Comparison
 
 `compareOrient2d(...)` and `compareIncircle(...)` report EPS, filtered exact, and exact
@@ -58,6 +66,15 @@ detection through `options.predicates`. Duplicate points immediately return dist
 convex clipper. The trace records the intermediate polygon after every clip edge.
 Boundary and clip-side tests use `options.predicates`.
 
+## Polygon Boolean Infrastructure
+
+`polygonBoolean(subject, clip, operation, options)` currently provides the data model,
+normalization, validation, point classification, and CLI skeleton for future general
+polygon boolean work. It supports `Ring2D`, `PolygonWithHoles2D`, and `MultiPolygon2D`
+inputs, but the overlay operation itself is not implemented yet. The CLI returns
+`polygon_boolean_operation_not_implemented` after valid input is normalized and
+validated.
+
 ## Ear Clipping Triangulation
 
 `triangulateEarClipping(polygon, options)` normalizes polygon orientation, removes
@@ -69,4 +86,6 @@ polygon is triangulated. Ear orientation and point-in-triangle tests use
 
 `delaunayTriangulation(points, options)` implements a Bowyer-Watson prototype. It is
 useful for visualization and portfolio discussion, but remains marked experimental. The
-cavity test uses `PredicateContext::incircle`; topology validation is still limited.
+cavity test uses `PredicateContext::incircle`. The result includes edges, a validity
+flag, and a `DelaunayValidationReport` covering duplicate triangles, CCW orientation,
+edge consistency, empty-circle checks, and convex-hull area coverage.

@@ -13,6 +13,13 @@ All public C++ symbols live in `namespace geokernel`.
 - `HalfPlane2D`
 - `Box2D`
 - `Triangle2D`
+- `Ring2D`
+- `PolygonWithHoles2D`
+- `MultiPolygon2D`
+- `SplitSegment`
+- `ArrangementNode`
+- `ArrangementEdge`
+- `DelaunayValidationReport`
 
 ## Robustness Helpers
 
@@ -53,11 +60,22 @@ All public C++ symbols live in `namespace geokernel`.
 - `findSegmentIntersections(segments, options)`
 - `sweepLineSegmentIntersections(segments, options, predicateMode)`
 - `bruteForceSegmentIntersections(segments, options, predicateMode)`
+- `buildSegmentArrangement(segments, options)`
 - `halfPlaneIntersection(halfPlanes, options)`
 - `closestPair(points, options)`
 - `sutherlandHodgmanClip(subject, clipper, options)`
 - `triangulateEarClipping(polygon, options)`
 - `delaunayTriangulation(points, options)`
+- `polygonBoolean(subject, clip, operation, options)`
+- `normalizeRing(...)`
+- `normalizePolygonWithHoles(...)`
+- `normalizeMultiPolygon(...)`
+- `validateRing(...)`
+- `validatePolygonWithHoles(...)`
+- `validateMultiPolygon(...)`
+- `pointInRing(...)`
+- `pointInPolygonWithHoles(...)`
+- `pointInMultiPolygon(...)`
 
 ## CLI
 
@@ -70,9 +88,11 @@ Supported algorithm names:
 - `convex_hull`
 - `rotating_calipers`
 - `segment_intersection`
+- `segment_arrangement`
 - `predicate_compare`
 - `half_plane_intersection`
 - `polygon_clipping`
+- `polygon_boolean`
 - `closest_pair`
 - `triangulation`
 - `delaunay`
@@ -91,6 +111,11 @@ Predicate-aware algorithm inputs may also include:
   "predicate_eps": 1e-9
 }
 ```
+
+Predicate-aware summaries include both `predicate_mode` and `predicate_eps`.
+
+`polygon_boolean` currently validates and normalizes `MultiPolygon2D` input. It does not
+yet compute the boolean overlay result.
 
 `predicate_compare` accepts:
 

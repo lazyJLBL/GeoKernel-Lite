@@ -100,12 +100,115 @@ TEST(SegmentIntersectionTest, ExactModeDoesNotTreatNearParallelSegmentsAsColline
     EXPECT_EQ(segmentIntersection(a, b, PredicateMode::FilteredExact).type, IntersectionType::None);
 }
 
+TEST(PredicateModeCoverageTest, ConvexHullNearCollinearDiffersByMode) {
+    std::vector<Point2D> points{{0, 0}, {1, 0}, {0.5, 1e-12}, {0.5, -1e-12}};
+    ConvexHullOptions epsOptions;
+    epsOptions.predicates = epsPredicateContext();
+    ConvexHullOptions exactOptions;
+    exactOptions.predicates = exactPredicateContext();
+
+    const auto epsHull = convexHullAndrew(points, epsOptions);
+    const auto exactHull = convexHullAndrew(points, exactOptions);
+    EXPECT_NE(epsHull.hull.size(), exactHull.hull.size());
+    EXPECT_FALSE(epsHull.warnings.empty());
+}
+
+TEST(PredicateModeCoverageTest, TriangulationNearCollinearEarDiffersByMode) {
+    Polygon2D polygon{{{0, 0}, {1, 0}, {1 + 1e-12, 1e-12}, {1, 1}, {0, 1}}};
+    AlgorithmOptions epsOptions;
+    epsOptions.predicates = epsPredicateContext();
+    AlgorithmOptions exactOptions;
+    exactOptions.predicates = exactPredicateContext();
+
+    const auto epsResult = triangulateEarClipping(polygon, epsOptions);
+    const auto exactResult = triangulateEarClipping(polygon, exactOptions);
+    EXPECT_TRUE(epsResult.valid);
+    EXPECT_TRUE(exactResult.valid);
+    EXPECT_NE(epsResult.triangles.size(), exactResult.triangles.size());
+}
+
+TEST(PredicateModeCoverageTest, DelaunayIncircleDiffersByMode) {
+    Triangle2D tri{{0, 0}, {1, 0}, {0, 1}};
+    Point2D nearCocircular{1, 0.999999999999};
+    EXPECT_FALSE(circumcircleContains(tri, nearCocircular, epsPredicateContext()));
+    EXPECT_TRUE(circumcircleContains(tri, nearCocircular, exactPredicateContext()));
+}
+
+TEST(PredicateModeCoverageTest, HalfPlaneBoundaryDiffersByMode) {
+    HalfPlane2D upper{{0, 0}, {1, 0}};
+    Point2D barelyOutside{0.5, -1e-12};
+    EXPECT_TRUE(upper.inside(barelyOutside, epsPredicateContext()));
+    EXPECT_FALSE(upper.inside(barelyOutside, exactPredicateContext()));
+}
+
 TEST(PolygonTest, ClassifiesInsideBoundaryOutside) {
     Polygon2D square{{{0, 0}, {2, 0}, {2, 2}, {0, 2}}};
     EXPECT_EQ(square.containsPoint({1, 1}), PointInPolygonResult::Inside);
     EXPECT_EQ(square.containsPoint({0, 1}), PointInPolygonResult::OnBoundary);
     EXPECT_EQ(square.containsPoint({3, 1}), PointInPolygonResult::Outside);
     EXPECT_TRUE(square.isConvex());
+}
+
+TEST(PolygonBooleanValidationTest, NormalizesOuterHoleAndDuplicates) {
+    PredicateContext predicates = filteredExactPredicateContext();
+    PolygonWithHoles2D polygon{
+        Ring2D{{{0, 0}, {0, 4}, {4, 4}, {4, 0}, {0, 0}}},
+        {Ring2D{{{1, 1}, {3, 1}, {3, 3}, {1, 3}, {1, 1}}}}
+    };
+
+    polygon = normalizePolygonWithHoles(std::move(polygon), predicates);
+    EXPECT_EQ(polygon.outer.vertices.size(), 4);
+    EXPECT_EQ(polygon.holes.front().vertices.size(), 4);
+    EXPECT_EQ(ringOrientation(polygon.outer, predicates), RingOrientation::CounterClockwise);
+    EXPECT_EQ(ringOrientation(polygon.holes.front(), predicates), RingOrientation::Clockwise);
+    EXPECT_TRUE(validatePolygonWithHoles(polygon, predicates).valid);
+}
+
+TEST(PolygonBooleanValidationTest, RejectsSelfIntersectionAndInvalidHoles) {
+    PredicateContext predicates = filteredExactPredicateContext();
+    Ring2D bowTie{{{0, 0}, {2, 2}, {0, 2}, {2, 0}}};
+    EXPECT_FALSE(validateRing(bowTie, predicates).valid);
+
+    PolygonWithHoles2D outsideHole{
+        Ring2D{{{0, 0}, {4, 0}, {4, 4}, {0, 4}}},
+        {Ring2D{{{5, 5}, {6, 5}, {6, 6}, {5, 6}}}}
+    };
+    outsideHole = normalizePolygonWithHoles(std::move(outsideHole), predicates);
+    EXPECT_FALSE(validatePolygonWithHoles(outsideHole, predicates).valid);
+
+    PolygonWithHoles2D touchingHole{
+        Ring2D{{{0, 0}, {4, 0}, {4, 4}, {0, 4}}},
+        {Ring2D{{{0, 1}, {2, 1}, {2, 2}, {0, 2}}}}
+    };
+    touchingHole = normalizePolygonWithHoles(std::move(touchingHole), predicates);
+    EXPECT_FALSE(validatePolygonWithHoles(touchingHole, predicates).valid);
+}
+
+TEST(PolygonBooleanValidationTest, ClassifiesPointWithHoleBoundary) {
+    PredicateContext predicates = filteredExactPredicateContext();
+    PolygonWithHoles2D polygon{
+        Ring2D{{{0, 0}, {4, 0}, {4, 4}, {0, 4}}},
+        {Ring2D{{{1, 1}, {3, 1}, {3, 3}, {1, 3}}}}
+    };
+    polygon = normalizePolygonWithHoles(std::move(polygon), predicates);
+    EXPECT_EQ(pointInPolygonWithHoles(polygon, {0.5, 0.5}, predicates), BoundaryLocation::Inside);
+    EXPECT_EQ(pointInPolygonWithHoles(polygon, {2, 2}, predicates), BoundaryLocation::Outside);
+    EXPECT_EQ(pointInPolygonWithHoles(polygon, {1, 2}, predicates), BoundaryLocation::OnBoundary);
+    EXPECT_EQ(pointInPolygonWithHoles(polygon, {5, 5}, predicates), BoundaryLocation::Outside);
+}
+
+TEST(PolygonBooleanValidationTest, SkeletonReportsNotImplementedAfterValidation) {
+    PolygonBooleanOptions options;
+    options.predicates = filteredExactPredicateContext();
+    options.trace = true;
+    MultiPolygon2D subject{{PolygonWithHoles2D{Ring2D{{{0, 0}, {2, 0}, {2, 2}, {0, 2}}}, {}}}};
+    MultiPolygon2D clip{{PolygonWithHoles2D{Ring2D{{{1, 1}, {3, 1}, {3, 3}, {1, 3}}}, {}}}};
+
+    auto result = polygonBoolean(subject, clip, BooleanOp::Union, options);
+    EXPECT_TRUE(result.inputValidation.valid);
+    EXPECT_FALSE(result.valid);
+    EXPECT_FALSE(result.warnings.empty());
+    EXPECT_FALSE(result.trace.empty());
 }
 
 TEST(ConvexHullTest, HandlesDuplicatesAndCollinearPolicy) {
@@ -161,6 +264,69 @@ TEST(SweepLineTest, MatchesBruteForceOracleOnDegenerateSet) {
 
     EXPECT_EQ(keys(sweep), keys(brute));
     EXPECT_EQ(sweep.eventCount, segments.size() * 2);
+}
+
+TEST(SegmentArrangementTest, SplitsSimpleCross) {
+    SegmentArrangementOptions options;
+    options.predicates = filteredExactPredicateContext();
+    options.trace = true;
+    const auto result = buildSegmentArrangement({{{0, 0}, {2, 2}}, {{0, 2}, {2, 0}}}, options);
+
+    EXPECT_TRUE(result.valid);
+    ASSERT_EQ(result.splitSegments.size(), 2);
+    EXPECT_EQ(result.intersections.size(), 1);
+    EXPECT_EQ(result.nodes.size(), 5);
+    EXPECT_EQ(result.edges.size(), 4);
+    EXPECT_EQ(result.splitSegments[0].atomicSegments.size(), 2);
+    EXPECT_EQ(result.splitSegments[1].atomicSegments.size(), 2);
+    EXPECT_FALSE(result.trace.empty());
+}
+
+TEST(SegmentArrangementTest, SplitsOverlappingHorizontalSegmentsConsistently) {
+    SegmentArrangementOptions options;
+    options.predicates = filteredExactPredicateContext();
+    const auto result = buildSegmentArrangement({{{0, 0}, {4, 0}}, {{2, 0}, {6, 0}}}, options);
+
+    EXPECT_TRUE(result.valid);
+    EXPECT_EQ(result.intersections.size(), 1);
+    EXPECT_EQ(result.nodes.size(), 4);
+    EXPECT_EQ(result.edges.size(), 4);
+    EXPECT_EQ(result.splitSegments[0].splitPoints.size(), 3);
+    EXPECT_EQ(result.splitSegments[1].splitPoints.size(), 3);
+}
+
+TEST(SegmentArrangementTest, HandlesSharedEndpointDuplicateAndZeroLength) {
+    SegmentArrangementOptions options;
+    options.predicates = filteredExactPredicateContext();
+    std::vector<Segment2D> segments{
+        {{0, 0}, {1, 0}},
+        {{1, 0}, {2, 0}},
+        {{0, 0}, {1, 0}},
+        {{3, 3}, {3, 3}}
+    };
+    const auto result = buildSegmentArrangement(segments, options);
+
+    EXPECT_TRUE(result.valid);
+    EXPECT_GE(result.nodes.size(), 3);
+    EXPECT_EQ(result.splitSegments[3].atomicSegments.size(), 0);
+    EXPECT_FALSE(result.warnings.empty());
+}
+
+TEST(SegmentArrangementTest, RandomSmallArrangementHasNoInteriorAtomicIntersections) {
+    SegmentArrangementOptions options;
+    options.predicates = filteredExactPredicateContext();
+    std::vector<Segment2D> segments{
+        {{0, 0}, {3, 3}},
+        {{0, 3}, {3, 0}},
+        {{1, -1}, {1, 4}},
+        {{0, 1}, {3, 1}},
+        {{2, -1}, {2, 4}}
+    };
+
+    const auto result = buildSegmentArrangement(segments, options);
+    EXPECT_TRUE(result.valid);
+    EXPECT_FALSE(result.nodes.empty());
+    EXPECT_FALSE(result.edges.empty());
 }
 
 TEST(FuzzTest, SweepMatchesBruteForceOnDeterministicRandomSegments) {
@@ -247,4 +413,33 @@ TEST(DelaunayTest, ProducesExperimentalTriangles) {
     auto result = delaunayTriangulation({{0, 0}, {1, 0}, {0, 1}, {1, 1}});
     EXPECT_TRUE(result.experimental);
     EXPECT_FALSE(result.triangles.empty());
+}
+
+TEST(DelaunayValidationTest, TriangleValidates) {
+    auto result = delaunayTriangulation({{0, 0}, {1, 0}, {0, 1}});
+    EXPECT_TRUE(result.valid);
+    EXPECT_EQ(result.triangles.size(), 1);
+    EXPECT_TRUE(result.validation.allTrianglesCcw);
+    EXPECT_TRUE(result.validation.emptyCircleProperty);
+    EXPECT_TRUE(result.validation.coversConvexHullArea);
+    EXPECT_NEAR(result.validation.areaError, 0.0, 1e-9);
+}
+
+TEST(DelaunayValidationTest, SquareValidationAllowsCocircularBoundary) {
+    auto result = delaunayTriangulation({{0, 0}, {1, 0}, {1, 1}, {0, 1}});
+    EXPECT_TRUE(result.valid);
+    EXPECT_TRUE(result.validation.emptyCircleProperty);
+    EXPECT_EQ(result.validation.triangleCount, 2);
+    EXPECT_EQ(result.edges.size(), result.validation.edgeCount);
+}
+
+TEST(DelaunayValidationTest, DegenerateInputsWarnClearly) {
+    auto duplicates = delaunayTriangulation({{0, 0}, {1, 0}, {0, 1}, {0, 1}});
+    EXPECT_TRUE(duplicates.valid);
+    EXPECT_FALSE(duplicates.warnings.empty());
+
+    auto collinear = delaunayTriangulation({{0, 0}, {1, 0}, {2, 0}, {3, 0}});
+    EXPECT_FALSE(collinear.valid);
+    EXPECT_TRUE(collinear.triangles.empty());
+    EXPECT_FALSE(collinear.warnings.empty());
 }

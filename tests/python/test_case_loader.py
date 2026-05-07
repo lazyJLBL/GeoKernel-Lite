@@ -13,7 +13,9 @@ def test_catalog_contains_at_least_50_boundary_cases():
     assert {case.algorithm for case in cases} >= {
         "convex_hull",
         "segment_intersection",
+        "segment_arrangement",
         "polygon_clipping",
+        "polygon_boolean",
         "half_plane_intersection",
         "closest_pair",
         "triangulation",

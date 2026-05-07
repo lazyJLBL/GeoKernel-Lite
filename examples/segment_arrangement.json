@@ -1,0 +1,11 @@
+{
+  "input": {
+    "predicate_mode": "filtered_exact",
+    "predicate_eps": 1e-9,
+    "segments": [
+      [[0, 0], [4, 0]],
+      [[2, -1], [2, 1]],
+      [[1, 0], [3, 0]]
+    ]
+  }
+}

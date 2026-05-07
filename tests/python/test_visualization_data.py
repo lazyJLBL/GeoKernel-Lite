@@ -31,6 +31,22 @@ def test_visualization_builds_segment_figure():
     assert len(fig.data) == 2
 
 
+def test_visualization_builds_arrangement_figure():
+    payload = {"input": {"segments": [[[0, 0], [2, 2]], [[0, 2], [2, 0]]]}}
+    output = {
+        "result": {
+            "nodes": [{"point": [0, 0]}, {"point": [1, 1]}, {"point": [2, 2]}],
+            "edges": [
+                {"segment": [[0, 0], [1, 1]]},
+                {"segment": [[1, 1], [2, 2]]},
+            ],
+        },
+        "trace": [],
+    }
+    fig = figure_for_result("segment_arrangement", payload, output)
+    assert len(fig.data) >= 5
+
+
 def test_visualization_builds_predicate_compare_figure():
     payload = {"input": {"predicate": "orient2d", "points": [[0, 0], [1, 0], [0.5, 1e-12]]}}
     output = {
@@ -43,3 +59,15 @@ def test_visualization_builds_predicate_compare_figure():
     }
     fig = figure_for_result("predicate_compare", payload, output)
     assert len(fig.data) == 1
+
+
+def test_visualization_builds_polygon_boolean_figure():
+    payload = {
+        "input": {
+            "subject": {"polygons": [{"outer": [[0, 0], [2, 0], [2, 2], [0, 2]], "holes": []}]},
+            "clip": {"polygons": [{"outer": [[1, 1], [3, 1], [3, 3], [1, 3]], "holes": []}]},
+        }
+    }
+    output = {"result": {"multipolygon": {"polygons": []}}, "trace": []}
+    fig = figure_for_result("polygon_boolean", payload, output)
+    assert len(fig.data) == 2

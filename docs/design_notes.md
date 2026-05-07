@@ -16,9 +16,9 @@ Most algorithm bodies intentionally remain in the umbrella header for now becaus
 types, helpers, trace structs, and algorithms are still tightly coupled. This keeps old
 include paths working while creating stable landing zones for future extraction.
 
-The placeholder headers for `arrangement`, `polygon_boolean`, and
-`constrained_delaunay` reserve public include paths only. They do not claim those
-algorithms are implemented.
+The `arrangement` include path now exposes the correctness-first segment arrangement
+builder. `polygon_boolean` exposes data structures, normalization, validation, and a
+CLI skeleton. `constrained_delaunay` remains a reserved public include path only.
 
 TODO: move implementation blocks out of `geokernel.hpp` once each module has narrow
 dependencies and dedicated tests.

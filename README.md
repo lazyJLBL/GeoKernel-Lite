@@ -33,8 +33,10 @@ GeoKernel-Lite 是一个专注于鲁棒谓词、退化案例处理、算法 trac
   triangulation.
 - Sweep-line segment intersection search backed by exact predicate classification,
   with a brute-force oracle kept for tests and benchmarks.
-- Experimental Bowyer-Watson Delaunay triangulation for visualization and future
-  expansion.
+- Correctness-first segment arrangement builder that splits crossings and overlaps into
+  an arrangement-ready graph for future overlay work.
+- Experimental Bowyer-Watson Delaunay triangulation with validation reporting for
+  visualization and future expansion.
 - CLI + JSON boundary between the C++ kernel and Python UI, keeping the algorithm core
   independent from Streamlit.
 - 100+ degenerate and boundary cases covering collinearity, overlaps, endpoint touches,
@@ -61,8 +63,9 @@ GeoKernel-Lite 是一个专注于鲁棒谓词、退化案例处理、算法 trac
 - Half-plane intersection clipped by a configurable visualization bounding box.
 - Divide-and-conquer closest pair of points.
 - Sutherland-Hodgman polygon clipping.
+- Polygon boolean data model, normalization, validation, and CLI skeleton.
 - Ear clipping triangulation with area verification.
-- Experimental Delaunay triangulation.
+- Experimental Delaunay triangulation with validation report.
 - Predicate comparison for EPS failure analysis.
 
 ### Visualization
@@ -127,9 +130,11 @@ Supported algorithm names:
 - `convex_hull`
 - `rotating_calipers`
 - `segment_intersection`
+- `segment_arrangement`
 - `predicate_compare`
 - `half_plane_intersection`
 - `polygon_clipping`
+- `polygon_boolean`
 - `closest_pair`
 - `triangulation`
 - `delaunay`
@@ -161,7 +166,9 @@ filtered exact classification.
 See [docs/robustness.md](docs/robustness.md) and
 [docs/predicates.md](docs/predicates.md), [docs/sweep_line.md](docs/sweep_line.md), and
 [docs/robustness_failures.md](docs/robustness_failures.md) for the detailed policy and
-boundary-case catalog. See [docs/known_limitations.md](docs/known_limitations.md) for
+boundary-case catalog. See
+[docs/exact_predicate_vs_exact_construction.md](docs/exact_predicate_vs_exact_construction.md)
+and [docs/known_limitations.md](docs/known_limitations.md) for
 the current non-goals and incomplete industrial-kernel features.
 
 ## Release Status

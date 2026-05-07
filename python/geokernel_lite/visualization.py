@@ -46,6 +46,15 @@ def add_polygon(fig: go.Figure, points: list[list[float]], name: str, color: str
     )
 
 
+def add_multipolygon(fig: go.Figure, multipolygon: dict[str, Any], name: str, color: str, fill: str = "none") -> None:
+    polygons = multipolygon.get("polygons", []) if isinstance(multipolygon, dict) else []
+    for poly_index, polygon in enumerate(polygons):
+        outer = polygon.get("outer", [])
+        add_polygon(fig, outer, f"{name} {poly_index} outer", color, fill=fill)
+        for hole_index, hole in enumerate(polygon.get("holes", [])):
+            add_polygon(fig, hole, f"{name} {poly_index} hole {hole_index}", color, fill="none")
+
+
 def empty_figure(title: str = "GeoKernel-Lite") -> go.Figure:
     fig = go.Figure()
     fig.update_layout(
@@ -69,8 +78,12 @@ def figure_for_result(algorithm: str, payload: dict[str, Any], output: dict[str,
         add_points(fig, input_data["points"], "input points", "#0f6b78")
     if "segments" in input_data:
         add_segments(fig, input_data["segments"], "input segment", "#525252")
-    if "subject" in input_data:
+    if "subject" in input_data and isinstance(input_data["subject"], list):
         add_polygon(fig, input_data["subject"], "subject", "#0f6b78", fill="none")
+    if "subject" in input_data and isinstance(input_data["subject"], dict):
+        add_multipolygon(fig, input_data["subject"], "subject", "#0f6b78", fill="none")
+    if "clip" in input_data and isinstance(input_data["clip"], dict):
+        add_multipolygon(fig, input_data["clip"], "clip", "#a23e2b", fill="none")
     if "clipper" in input_data:
         add_polygon(fig, input_data["clipper"], "clipper", "#a23e2b")
     if "polygon" in input_data:
@@ -80,6 +93,18 @@ def figure_for_result(algorithm: str, payload: dict[str, Any], output: dict[str,
         add_polygon(fig, result["hull"], "convex hull", "#c43b3b")
     if result.get("polygon"):
         add_polygon(fig, result["polygon"], "result polygon", "#2f855a")
+    if result.get("multipolygon"):
+        add_multipolygon(fig, result["multipolygon"], "result", "#2f855a")
+    if result.get("edges"):
+        result_edges = []
+        for edge in result["edges"]:
+            if isinstance(edge, dict) and "segment" in edge:
+                result_edges.append(edge["segment"])
+            elif isinstance(edge, list):
+                result_edges.append(edge)
+        add_segments(fig, result_edges, "result edge", "#2f855a")
+    if result.get("nodes"):
+        add_points(fig, [node["point"] for node in result["nodes"] if "point" in node], "arrangement nodes", "#d97706")
     if result.get("diameter"):
         add_segments(fig, [[result["diameter"]["p1"], result["diameter"]["p2"]]], "diameter", "#c43b3b")
     if result.get("minimum_area_rectangle"):

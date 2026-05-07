@@ -59,6 +59,12 @@ EPS reports `0`, while filtered exact and exact report `+1`.
 
 ## Current Limits
 
-The exact predicate layer currently covers `orient2d` and `incircle`. Existing polygon,
-half-plane, triangulation, and Delaunay code still use EPS predicates except where a
-predicate-aware API explicitly accepts `PredicateMode`.
+The exact predicate layer currently covers `orient2d` and `incircle`. Core algorithms
+route most topology decisions through `PredicateContext`, including convex hull,
+segment intersection, polygon normalization, point-in-polygon boundary checks,
+half-plane side tests, polygon clipping side tests, ear clipping, and Delaunay cavity
+incircle tests.
+
+This is still exact predicate support, not exact construction. Polygon area, distance,
+projection, line intersection coordinates, clipping output vertices, rectangle fitting,
+and circumcircle-derived constructions remain double-based.

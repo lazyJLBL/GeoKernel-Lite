@@ -604,10 +604,435 @@ struct TraceStep {
     std::map<std::string, double> metrics;
 };
 
+using Trace = std::vector<TraceStep>;
+
 struct AlgorithmOptions {
     bool trace = false;
     PredicateContext predicates = filteredExactPredicateContext();
 };
+
+struct Ring2D {
+    std::vector<Point2D> vertices;
+};
+
+struct PolygonWithHoles2D {
+    Ring2D outer;
+    std::vector<Ring2D> holes;
+};
+
+struct MultiPolygon2D {
+    std::vector<PolygonWithHoles2D> polygons;
+};
+
+enum class FillRule {
+    EvenOdd,
+    NonZero
+};
+
+enum class BooleanOp {
+    Union,
+    Intersection,
+    Difference,
+    Xor
+};
+
+enum class RingOrientation {
+    Clockwise,
+    CounterClockwise,
+    Degenerate
+};
+
+enum class BoundaryLocation {
+    Outside,
+    Inside,
+    OnBoundary
+};
+
+struct GeometryValidationReport {
+    bool valid = true;
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
+};
+
+struct PolygonBooleanOptions {
+    PredicateContext predicates = filteredExactPredicateContext();
+    FillRule fillRule = FillRule::EvenOdd;
+    bool normalizeInput = true;
+    bool validateInput = true;
+    bool validateOutput = true;
+    bool trace = false;
+};
+
+struct PolygonBooleanResult {
+    MultiPolygon2D result;
+    bool valid = false;
+    std::vector<std::string> warnings;
+    Trace trace;
+    GeometryValidationReport inputValidation;
+    GeometryValidationReport outputValidation;
+};
+
+inline const char* fillRuleName(FillRule rule) {
+    switch (rule) {
+        case FillRule::EvenOdd: return "even_odd";
+        case FillRule::NonZero: return "non_zero";
+    }
+    return "unknown";
+}
+
+inline FillRule fillRuleFromString(const std::string& value) {
+    if (value == "even_odd" || value == "evenodd") return FillRule::EvenOdd;
+    if (value == "non_zero" || value == "nonzero") return FillRule::NonZero;
+    throw std::invalid_argument("unknown fill rule: " + value);
+}
+
+inline const char* booleanOpName(BooleanOp op) {
+    switch (op) {
+        case BooleanOp::Union: return "union";
+        case BooleanOp::Intersection: return "intersection";
+        case BooleanOp::Difference: return "difference";
+        case BooleanOp::Xor: return "xor";
+    }
+    return "unknown";
+}
+
+inline BooleanOp booleanOpFromString(const std::string& value) {
+    if (value == "union") return BooleanOp::Union;
+    if (value == "intersection" || value == "intersect") return BooleanOp::Intersection;
+    if (value == "difference" || value == "diff") return BooleanOp::Difference;
+    if (value == "xor" || value == "symmetric_difference") return BooleanOp::Xor;
+    throw std::invalid_argument("unknown polygon boolean operation: " + value);
+}
+
+inline const char* ringOrientationName(RingOrientation orientation) {
+    switch (orientation) {
+        case RingOrientation::Clockwise: return "clockwise";
+        case RingOrientation::CounterClockwise: return "counter_clockwise";
+        case RingOrientation::Degenerate: return "degenerate";
+    }
+    return "unknown";
+}
+
+inline const char* boundaryLocationName(BoundaryLocation location) {
+    switch (location) {
+        case BoundaryLocation::Outside: return "outside";
+        case BoundaryLocation::Inside: return "inside";
+        case BoundaryLocation::OnBoundary: return "on_boundary";
+    }
+    return "unknown";
+}
+
+inline void addValidationError(GeometryValidationReport& report, const std::string& error) {
+    report.valid = false;
+    report.errors.push_back(error);
+}
+
+inline void appendValidationReport(
+    GeometryValidationReport& target,
+    const GeometryValidationReport& source,
+    const std::string& prefix) {
+    if (!source.valid) target.valid = false;
+    for (const auto& error : source.errors) target.errors.push_back(prefix + error);
+    for (const auto& warning : source.warnings) target.warnings.push_back(prefix + warning);
+}
+
+inline Ring2D removeClosingDuplicate(Ring2D ring, const PredicateContext& predicates = filteredExactPredicateContext()) {
+    if (ring.vertices.size() > 1 && predicates.equals(ring.vertices.front(), ring.vertices.back())) {
+        ring.vertices.pop_back();
+    }
+    return ring;
+}
+
+inline Ring2D removeConsecutiveDuplicates(Ring2D ring, const PredicateContext& predicates = filteredExactPredicateContext()) {
+    ring.vertices = removeConsecutiveDuplicatePoints(ring.vertices, predicates);
+    return ring;
+}
+
+inline Ring2D removeCollinearVertices(Ring2D ring, const PredicateContext& predicates = filteredExactPredicateContext()) {
+    ring.vertices = geokernel::removeCollinearVertices(ring.vertices, predicates);
+    return ring;
+}
+
+inline double signedRingArea(const Ring2D& ring) {
+    return Polygon2D{ring.vertices}.signedArea();
+}
+
+inline double ringArea(const Ring2D& ring) {
+    return std::fabs(signedRingArea(ring));
+}
+
+inline RingOrientation ringOrientation(const Ring2D& ring, const PredicateContext& predicates = filteredExactPredicateContext()) {
+    const int areaSign = sign(signedRingArea(ring), predicates.eps);
+    if (areaSign > 0) return RingOrientation::CounterClockwise;
+    if (areaSign < 0) return RingOrientation::Clockwise;
+    return RingOrientation::Degenerate;
+}
+
+inline std::vector<Segment2D> ringSegments(const Ring2D& ring) {
+    return Polygon2D{ring.vertices}.edges();
+}
+
+inline Box2D ringBoundingBox(const Ring2D& ring) {
+    Box2D box;
+    if (ring.vertices.empty()) return box;
+    box.min = ring.vertices.front();
+    box.max = ring.vertices.front();
+    for (const auto& p : ring.vertices) {
+        box.min.x = std::min(box.min.x, p.x);
+        box.min.y = std::min(box.min.y, p.y);
+        box.max.x = std::max(box.max.x, p.x);
+        box.max.y = std::max(box.max.y, p.y);
+    }
+    return box;
+}
+
+inline bool boxesOverlap(const Box2D& a, const Box2D& b, const PredicateContext& predicates = filteredExactPredicateContext()) {
+    if (predicates.mode == PredicateMode::Eps) {
+        return lessOrEqual(a.min.x, b.max.x, predicates.eps) &&
+               lessOrEqual(b.min.x, a.max.x, predicates.eps) &&
+               lessOrEqual(a.min.y, b.max.y, predicates.eps) &&
+               lessOrEqual(b.min.y, a.max.y, predicates.eps);
+    }
+    return a.min.x <= b.max.x && b.min.x <= a.max.x && a.min.y <= b.max.y && b.min.y <= a.max.y;
+}
+
+inline Ring2D normalizeRing(
+    Ring2D ring,
+    const PredicateContext& predicates = filteredExactPredicateContext(),
+    RingOrientation desired = RingOrientation::CounterClockwise) {
+    ring = removeClosingDuplicate(std::move(ring), predicates);
+    ring = removeConsecutiveDuplicates(std::move(ring), predicates);
+    ring = removeCollinearVertices(std::move(ring), predicates);
+    const RingOrientation orientation = ringOrientation(ring, predicates);
+    if (desired == RingOrientation::CounterClockwise && orientation == RingOrientation::Clockwise) {
+        std::reverse(ring.vertices.begin(), ring.vertices.end());
+    } else if (desired == RingOrientation::Clockwise && orientation == RingOrientation::CounterClockwise) {
+        std::reverse(ring.vertices.begin(), ring.vertices.end());
+    }
+    return ring;
+}
+
+inline PolygonWithHoles2D normalizePolygonWithHoles(
+    PolygonWithHoles2D polygon,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    polygon.outer = normalizeRing(std::move(polygon.outer), predicates, RingOrientation::CounterClockwise);
+    for (auto& hole : polygon.holes) {
+        hole = normalizeRing(std::move(hole), predicates, RingOrientation::Clockwise);
+    }
+    return polygon;
+}
+
+inline MultiPolygon2D normalizeMultiPolygon(
+    MultiPolygon2D multipolygon,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    for (auto& polygon : multipolygon.polygons) {
+        polygon = normalizePolygonWithHoles(std::move(polygon), predicates);
+    }
+    return multipolygon;
+}
+
+inline BoundaryLocation pointInRing(
+    const Ring2D& ring,
+    const Point2D& point,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    const auto location = Polygon2D{ring.vertices}.containsPoint(point, predicates);
+    switch (location) {
+        case PointInPolygonResult::Inside: return BoundaryLocation::Inside;
+        case PointInPolygonResult::OnBoundary: return BoundaryLocation::OnBoundary;
+        case PointInPolygonResult::Outside: return BoundaryLocation::Outside;
+    }
+    return BoundaryLocation::Outside;
+}
+
+inline bool ringSelfIntersects(const Ring2D& ring, const PredicateContext& predicates = filteredExactPredicateContext()) {
+    const auto edges = ringSegments(ring);
+    if (edges.size() < 4) return false;
+    for (std::size_t i = 0; i < edges.size(); ++i) {
+        for (std::size_t j = i + 1; j < edges.size(); ++j) {
+            const bool adjacent = j == i + 1 || (i == 0 && j + 1 == edges.size());
+            if (adjacent) continue;
+            if (segmentIntersection(edges[i], edges[j], predicates).type != IntersectionType::None) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline bool ringsIntersect(
+    const Ring2D& a,
+    const Ring2D& b,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    if (!boxesOverlap(ringBoundingBox(a), ringBoundingBox(b), predicates)) return false;
+    const auto aEdges = ringSegments(a);
+    const auto bEdges = ringSegments(b);
+    for (const auto& ae : aEdges) {
+        for (const auto& be : bEdges) {
+            if (segmentIntersection(ae, be, predicates).type != IntersectionType::None) return true;
+        }
+    }
+    return false;
+}
+
+inline BoundaryLocation pointInPolygonWithHoles(
+    const PolygonWithHoles2D& polygon,
+    const Point2D& point,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    const BoundaryLocation outer = pointInRing(polygon.outer, point, predicates);
+    if (outer != BoundaryLocation::Inside) return outer;
+    for (const auto& hole : polygon.holes) {
+        const BoundaryLocation inHole = pointInRing(hole, point, predicates);
+        if (inHole == BoundaryLocation::OnBoundary) return BoundaryLocation::OnBoundary;
+        if (inHole == BoundaryLocation::Inside) return BoundaryLocation::Outside;
+    }
+    return BoundaryLocation::Inside;
+}
+
+inline BoundaryLocation pointInMultiPolygon(
+    const MultiPolygon2D& multipolygon,
+    const Point2D& point,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    bool insideAny = false;
+    for (const auto& polygon : multipolygon.polygons) {
+        const BoundaryLocation location = pointInPolygonWithHoles(polygon, point, predicates);
+        if (location == BoundaryLocation::OnBoundary) return BoundaryLocation::OnBoundary;
+        if (location == BoundaryLocation::Inside) insideAny = true;
+    }
+    return insideAny ? BoundaryLocation::Inside : BoundaryLocation::Outside;
+}
+
+inline GeometryValidationReport validateRing(
+    const Ring2D& ring,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    GeometryValidationReport report;
+    Ring2D cleaned = removeClosingDuplicate(ring, predicates);
+    cleaned = removeConsecutiveDuplicates(std::move(cleaned), predicates);
+    cleaned = removeCollinearVertices(std::move(cleaned), predicates);
+    if (cleaned.vertices.size() < 3) {
+        addValidationError(report, "ring_has_fewer_than_three_vertices");
+        return report;
+    }
+    if (ringOrientation(cleaned, predicates) == RingOrientation::Degenerate) {
+        addValidationError(report, "ring_area_is_zero");
+    }
+    if (ringSelfIntersects(cleaned, predicates)) {
+        addValidationError(report, "ring_self_intersects");
+    }
+    return report;
+}
+
+inline GeometryValidationReport validatePolygonWithHoles(
+    const PolygonWithHoles2D& polygon,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    GeometryValidationReport report;
+    appendValidationReport(report, validateRing(polygon.outer, predicates), "outer.");
+    if (!report.valid) return report;
+
+    for (std::size_t i = 0; i < polygon.holes.size(); ++i) {
+        const std::string holePrefix = "hole_" + std::to_string(i) + ".";
+        const auto holeReport = validateRing(polygon.holes[i], predicates);
+        appendValidationReport(report, holeReport, holePrefix);
+        if (!holeReport.valid) continue;
+        if (ringsIntersect(polygon.outer, polygon.holes[i], predicates)) {
+            addValidationError(report, holePrefix + "intersects_or_touches_outer_boundary");
+        } else if (polygon.holes[i].vertices.empty() ||
+                   pointInRing(polygon.outer, polygon.holes[i].vertices.front(), predicates) != BoundaryLocation::Inside) {
+            addValidationError(report, holePrefix + "not_strictly_inside_outer");
+        }
+        for (std::size_t j = i + 1; j < polygon.holes.size(); ++j) {
+            if (ringsIntersect(polygon.holes[i], polygon.holes[j], predicates)) {
+                addValidationError(report, "holes_intersect_or_touch");
+            } else if (!polygon.holes[i].vertices.empty() && !polygon.holes[j].vertices.empty()) {
+                const bool iInsideJ = pointInRing(polygon.holes[j], polygon.holes[i].vertices.front(), predicates) == BoundaryLocation::Inside;
+                const bool jInsideI = pointInRing(polygon.holes[i], polygon.holes[j].vertices.front(), predicates) == BoundaryLocation::Inside;
+                if (iInsideJ || jInsideI) addValidationError(report, "holes_overlap_or_nested");
+            }
+        }
+    }
+    return report;
+}
+
+inline GeometryValidationReport validateMultiPolygon(
+    const MultiPolygon2D& multipolygon,
+    const PredicateContext& predicates = filteredExactPredicateContext()) {
+    GeometryValidationReport report;
+    if (multipolygon.polygons.empty()) {
+        report.warnings.push_back("multipolygon_is_empty");
+        return report;
+    }
+    for (std::size_t i = 0; i < multipolygon.polygons.size(); ++i) {
+        appendValidationReport(report, validatePolygonWithHoles(multipolygon.polygons[i], predicates), "polygon_" + std::to_string(i) + ".");
+    }
+    for (std::size_t i = 0; i < multipolygon.polygons.size(); ++i) {
+        for (std::size_t j = i + 1; j < multipolygon.polygons.size(); ++j) {
+            if (ringsIntersect(multipolygon.polygons[i].outer, multipolygon.polygons[j].outer, predicates)) {
+                addValidationError(report, "multipolygon_components_intersect_or_touch");
+                continue;
+            }
+            if (!multipolygon.polygons[i].outer.vertices.empty() &&
+                pointInPolygonWithHoles(multipolygon.polygons[j], multipolygon.polygons[i].outer.vertices.front(), predicates) == BoundaryLocation::Inside) {
+                addValidationError(report, "multipolygon_components_overlap");
+            }
+            if (!multipolygon.polygons[j].outer.vertices.empty() &&
+                pointInPolygonWithHoles(multipolygon.polygons[i], multipolygon.polygons[j].outer.vertices.front(), predicates) == BoundaryLocation::Inside) {
+                addValidationError(report, "multipolygon_components_overlap");
+            }
+        }
+    }
+    return report;
+}
+
+inline double polygonWithHolesArea(const PolygonWithHoles2D& polygon) {
+    double area = ringArea(polygon.outer);
+    for (const auto& hole : polygon.holes) area -= ringArea(hole);
+    return area;
+}
+
+inline double multiPolygonArea(const MultiPolygon2D& multipolygon) {
+    double area = 0.0;
+    for (const auto& polygon : multipolygon.polygons) area += polygonWithHolesArea(polygon);
+    return area;
+}
+
+inline PolygonBooleanResult polygonBoolean(
+    const MultiPolygon2D& subjectInput,
+    const MultiPolygon2D& clipInput,
+    BooleanOp operation,
+    const PolygonBooleanOptions& options = {}) {
+    PolygonBooleanResult result;
+    MultiPolygon2D subject = options.normalizeInput ? normalizeMultiPolygon(subjectInput, options.predicates) : subjectInput;
+    MultiPolygon2D clip = options.normalizeInput ? normalizeMultiPolygon(clipInput, options.predicates) : clipInput;
+    int step = 0;
+    if (options.trace) {
+        std::vector<Polygon2D> polygons;
+        for (const auto& polygon : subject.polygons) polygons.push_back(Polygon2D{polygon.outer.vertices});
+        for (const auto& polygon : clip.polygons) polygons.push_back(Polygon2D{polygon.outer.vertices});
+        result.trace.push_back({step++, "normalization", "Normalized polygon boolean inputs.", {}, {}, polygons, {{"subject_polygons", static_cast<double>(subject.polygons.size())}, {"clip_polygons", static_cast<double>(clip.polygons.size())}}});
+    }
+
+    if (options.validateInput) {
+        appendValidationReport(result.inputValidation, validateMultiPolygon(subject, options.predicates), "subject.");
+        appendValidationReport(result.inputValidation, validateMultiPolygon(clip, options.predicates), "clip.");
+        if (options.trace) {
+            result.trace.push_back({step++, "validation", "Validated polygon boolean inputs.", {}, {}, {}, {{"valid", result.inputValidation.valid ? 1.0 : 0.0}}});
+        }
+        if (!result.inputValidation.valid) {
+            result.warnings.insert(result.warnings.end(), result.inputValidation.errors.begin(), result.inputValidation.errors.end());
+            return result;
+        }
+    }
+
+    (void)operation;
+    result.valid = false;
+    result.warnings.push_back("polygon_boolean_operation_not_implemented");
+    if (options.trace) {
+        result.trace.push_back({step++, "operation_not_implemented", "Polygon boolean overlay is not implemented in this stage.", {}, {}, {}, {}});
+    }
+    if (options.validateOutput) {
+        result.outputValidation = validateMultiPolygon(result.result, options.predicates);
+    }
+    return result;
+}
 
 struct ConvexHullOptions : AlgorithmOptions {
     bool keepCollinear = false;
@@ -798,6 +1223,44 @@ struct SegmentIntersectionSearchResult {
     std::size_t eventCount = 0;
     std::string implementation = "unknown";
     PredicateMode predicateMode = PredicateMode::FilteredExact;
+};
+
+struct SegmentIntersectionRecord {
+    std::size_t first = 0;
+    std::size_t second = 0;
+    SegmentIntersectionResult intersection;
+};
+
+struct SplitSegment {
+    Segment2D original;
+    std::vector<Point2D> splitPoints;
+    std::vector<Segment2D> atomicSegments;
+};
+
+struct ArrangementNode {
+    Point2D point;
+    std::vector<std::size_t> outgoingEdges;
+};
+
+struct ArrangementEdge {
+    std::size_t from = 0;
+    std::size_t to = 0;
+    Segment2D segment;
+    std::size_t sourceSegmentId = 0;
+};
+
+struct SegmentArrangementOptions : AlgorithmOptions {
+    bool validate = true;
+};
+
+struct SegmentArrangementResult {
+    std::vector<ArrangementNode> nodes;
+    std::vector<ArrangementEdge> edges;
+    std::vector<SplitSegment> splitSegments;
+    std::vector<SegmentIntersectionRecord> intersections;
+    bool valid = false;
+    std::vector<std::string> warnings;
+    Trace trace;
 };
 
 inline void sortSegmentIntersectionPairs(std::vector<SegmentIntersectionPair>& pairs) {
@@ -995,6 +1458,188 @@ inline SegmentIntersectionSearchResult findSegmentIntersections(
 
 inline bool hasAnySegmentIntersection(const std::vector<Segment2D>& segments) {
     return findSegmentIntersections(segments).hasIntersection;
+}
+
+inline double segmentParameter(const Segment2D& segment, const Point2D& point) {
+    const Vector2D ab = segment.b - segment.a;
+    const double denom = squaredNorm(ab);
+    if (denom == 0.0) return 0.0;
+    return dot(point - segment.a, ab) / denom;
+}
+
+inline void addSplitPoint(
+    std::vector<Point2D>& points,
+    const Point2D& point,
+    const PredicateContext& predicates) {
+    for (const auto& existing : points) {
+        if (predicates.equals(existing, point)) return;
+    }
+    points.push_back(point);
+}
+
+inline bool segmentEndpointsEqualUndirected(
+    const Segment2D& a,
+    const Segment2D& b,
+    const PredicateContext& predicates) {
+    return (predicates.equals(a.a, b.a) && predicates.equals(a.b, b.b)) ||
+           (predicates.equals(a.a, b.b) && predicates.equals(a.b, b.a));
+}
+
+inline bool pointIsSegmentEndpoint(
+    const Segment2D& segment,
+    const Point2D& point,
+    const PredicateContext& predicates) {
+    return predicates.equals(segment.a, point) || predicates.equals(segment.b, point);
+}
+
+inline std::size_t arrangementNodeId(
+    std::vector<ArrangementNode>& nodes,
+    const Point2D& point,
+    const PredicateContext& predicates) {
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        if (predicates.equals(nodes[i].point, point)) return i;
+    }
+    nodes.push_back({point, {}});
+    return nodes.size() - 1;
+}
+
+inline bool validateArrangementAtomicSegments(
+    const std::vector<ArrangementEdge>& edges,
+    const PredicateContext& predicates,
+    std::vector<std::string>& warnings) {
+    bool valid = true;
+    for (std::size_t i = 0; i < edges.size(); ++i) {
+        for (std::size_t j = i + 1; j < edges.size(); ++j) {
+            const auto intersection = segmentIntersection(edges[i].segment, edges[j].segment, predicates);
+            if (intersection.type == IntersectionType::None) continue;
+            if (intersection.type == IntersectionType::Point && intersection.point.has_value()) {
+                const bool endpointOnFirst = pointIsSegmentEndpoint(edges[i].segment, *intersection.point, predicates);
+                const bool endpointOnSecond = pointIsSegmentEndpoint(edges[j].segment, *intersection.point, predicates);
+                if (!endpointOnFirst || !endpointOnSecond) {
+                    warnings.push_back("atomic_segments_have_internal_point_intersection");
+                    valid = false;
+                }
+            } else if (intersection.type == IntersectionType::Overlap && intersection.overlap.has_value()) {
+                if (!segmentEndpointsEqualUndirected(edges[i].segment, edges[j].segment, predicates)) {
+                    warnings.push_back("atomic_segments_have_internal_overlap");
+                    valid = false;
+                }
+            }
+        }
+    }
+    return valid;
+}
+
+inline SegmentArrangementResult buildSegmentArrangement(
+    const std::vector<Segment2D>& segments,
+    const SegmentArrangementOptions& options = {}) {
+    SegmentArrangementResult result;
+    const PredicateContext& predicates = options.predicates;
+    result.splitSegments.reserve(segments.size());
+    std::vector<std::vector<Point2D>> splitPoints(segments.size());
+    int step = 0;
+
+    for (std::size_t i = 0; i < segments.size(); ++i) {
+        result.splitSegments.push_back({segments[i], {}, {}});
+        if (segmentIsPointByContext(segments[i], predicates)) {
+            result.warnings.push_back("zero_length_segment");
+            addSplitPoint(splitPoints[i], segments[i].a, predicates);
+            continue;
+        }
+        addSplitPoint(splitPoints[i], segments[i].a, predicates);
+        addSplitPoint(splitPoints[i], segments[i].b, predicates);
+    }
+
+    AlgorithmOptions intersectionOptions;
+    intersectionOptions.predicates = predicates;
+    const auto intersections = bruteForceSegmentIntersections(segments, intersectionOptions, predicates);
+    for (const auto& pair : intersections.pairs) {
+        result.intersections.push_back({static_cast<std::size_t>(pair.first), static_cast<std::size_t>(pair.second), pair.intersection});
+        const std::size_t first = static_cast<std::size_t>(pair.first);
+        const std::size_t second = static_cast<std::size_t>(pair.second);
+        if (pair.intersection.type == IntersectionType::Point && pair.intersection.point.has_value()) {
+            addSplitPoint(splitPoints[first], *pair.intersection.point, predicates);
+            addSplitPoint(splitPoints[second], *pair.intersection.point, predicates);
+        } else if (pair.intersection.type == IntersectionType::Overlap && pair.intersection.overlap.has_value()) {
+            const std::array<Point2D, 6> candidates{
+                segments[first].a,
+                segments[first].b,
+                segments[second].a,
+                segments[second].b,
+                pair.intersection.overlap->a,
+                pair.intersection.overlap->b
+            };
+            for (const auto& candidate : candidates) {
+                if (segmentContainsPoint(segments[first], candidate, predicates)) addSplitPoint(splitPoints[first], candidate, predicates);
+                if (segmentContainsPoint(segments[second], candidate, predicates)) addSplitPoint(splitPoints[second], candidate, predicates);
+            }
+        }
+    }
+    if (options.trace) {
+        result.trace.push_back({step++, "intersection_detection", "Detected pairwise segment intersections for arrangement splitting.", {}, segments, {}, {{"intersection_count", static_cast<double>(result.intersections.size())}}});
+    }
+
+    if (options.trace) {
+        std::vector<Point2D> allSplitPoints;
+        for (const auto& points : splitPoints) {
+            allSplitPoints.insert(allSplitPoints.end(), points.begin(), points.end());
+        }
+        result.trace.push_back({step++, "split_point_collection", "Collected segment endpoints, crossing points, and overlap boundaries.", allSplitPoints, segments, {}, {{"split_point_count", static_cast<double>(allSplitPoints.size())}}});
+    }
+
+    for (std::size_t i = 0; i < segments.size(); ++i) {
+        auto& points = splitPoints[i];
+        std::sort(points.begin(), points.end(), [&](const Point2D& a, const Point2D& b) {
+            const double ta = segmentParameter(segments[i], a);
+            const double tb = segmentParameter(segments[i], b);
+            if (ta != tb) return ta < tb;
+            return predicates.compareLexicographic(a, b) < 0;
+        });
+        std::vector<Point2D> unique;
+        for (const auto& point : points) {
+            if (unique.empty() || !predicates.equals(unique.back(), point)) unique.push_back(point);
+        }
+        result.splitSegments[i].splitPoints = unique;
+        for (std::size_t j = 1; j < unique.size(); ++j) {
+            if (!predicates.equals(unique[j - 1], unique[j])) {
+                result.splitSegments[i].atomicSegments.push_back({unique[j - 1], unique[j]});
+            }
+        }
+    }
+    if (options.trace) {
+        std::vector<Segment2D> atomic;
+        for (const auto& split : result.splitSegments) {
+            atomic.insert(atomic.end(), split.atomicSegments.begin(), split.atomicSegments.end());
+        }
+        result.trace.push_back({step++, "segment_splitting", "Split input segments into atomic subsegments.", {}, atomic, {}, {{"atomic_segment_count", static_cast<double>(atomic.size())}}});
+    }
+
+    for (std::size_t source = 0; source < result.splitSegments.size(); ++source) {
+        for (const auto& atomic : result.splitSegments[source].atomicSegments) {
+            const std::size_t from = arrangementNodeId(result.nodes, atomic.a, predicates);
+            const std::size_t to = arrangementNodeId(result.nodes, atomic.b, predicates);
+            if (from == to) continue;
+            const std::size_t edgeId = result.edges.size();
+            result.edges.push_back({from, to, atomic, source});
+            result.nodes[from].outgoingEdges.push_back(edgeId);
+        }
+    }
+    if (options.trace) {
+        std::vector<Point2D> nodes;
+        nodes.reserve(result.nodes.size());
+        for (const auto& node : result.nodes) nodes.push_back(node.point);
+        result.trace.push_back({step++, "node_dedup", "Deduplicated arrangement nodes with PredicateContext.", nodes, {}, {}, {{"node_count", static_cast<double>(result.nodes.size())}}});
+        result.trace.push_back({step++, "edge_creation", "Created directed arrangement edges for atomic subsegments.", {}, {}, {}, {{"edge_count", static_cast<double>(result.edges.size())}}});
+    }
+
+    result.valid = true;
+    if (options.validate) {
+        result.valid = validateArrangementAtomicSegments(result.edges, predicates, result.warnings);
+    }
+    if (options.trace) {
+        result.trace.push_back({step++, "validation", "Validated that atomic segments do not contain unsplit interior intersections.", {}, {}, {}, {{"valid", result.valid ? 1.0 : 0.0}}});
+    }
+    return result;
 }
 
 enum class PolygonClipStatus {
@@ -1298,14 +1943,136 @@ inline TriangulationResult triangulateEarClipping(const Polygon2D& polygon, cons
     return result;
 }
 
+struct DelaunayValidationReport {
+    bool noDuplicateTriangles = true;
+    bool allTrianglesCcw = true;
+    bool noSuperTriangleVertex = true;
+    bool edgesConsistent = true;
+    bool emptyCircleProperty = true;
+    bool coversConvexHullArea = true;
+    double triangleAreaSum = 0.0;
+    double hullArea = 0.0;
+    double areaError = 0.0;
+    std::size_t triangleCount = 0;
+    std::size_t edgeCount = 0;
+    std::size_t failedEmptyCircleChecks = 0;
+    std::vector<std::string> failedChecks;
+};
+
 struct DelaunayResult {
     std::vector<Triangle2D> triangles;
+    std::vector<Segment2D> edges;
+    bool valid = false;
     bool experimental = true;
+    DelaunayValidationReport validation;
     std::vector<TraceStep> trace;
     std::vector<std::string> warnings;
 };
 
 inline bool circumcircleContains(const Triangle2D& t, const Point2D& p, const PredicateContext& predicates);
+
+inline std::optional<std::size_t> findPointIndex(
+    const std::vector<Point2D>& points,
+    const Point2D& point,
+    const PredicateContext& predicates) {
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        if (predicates.equals(points[i], point)) return i;
+    }
+    return std::nullopt;
+}
+
+inline std::array<std::size_t, 3> sortedTriangleIndices(std::array<std::size_t, 3> ids) {
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
+inline std::pair<std::size_t, std::size_t> sortedEdgeKey(std::size_t a, std::size_t b) {
+    return a < b ? std::make_pair(a, b) : std::make_pair(b, a);
+}
+
+inline DelaunayValidationReport validateDelaunayTriangulation(
+    const std::vector<Point2D>& inputPoints,
+    const std::vector<Triangle2D>& triangles,
+    const PredicateContext& predicates,
+    std::vector<Segment2D>* edgesOut = nullptr) {
+    DelaunayValidationReport report;
+    const std::vector<Point2D> points = removeDuplicatePoints(inputPoints, predicates);
+    report.triangleCount = triangles.size();
+
+    std::set<std::array<std::size_t, 3>> triangleKeys;
+    std::map<std::pair<std::size_t, std::size_t>, std::size_t> edgeCounts;
+    for (const auto& tri : triangles) {
+        report.triangleAreaSum += tri.area();
+        if (predicates.orient(tri.a, tri.b, tri.c) <= 0) {
+            report.allTrianglesCcw = false;
+            report.failedChecks.push_back("triangle_not_ccw");
+        }
+        const auto ia = findPointIndex(points, tri.a, predicates);
+        const auto ib = findPointIndex(points, tri.b, predicates);
+        const auto ic = findPointIndex(points, tri.c, predicates);
+        if (!ia.has_value() || !ib.has_value() || !ic.has_value()) {
+            report.noSuperTriangleVertex = false;
+            report.failedChecks.push_back("triangle_contains_non_input_vertex");
+            continue;
+        }
+        const auto key = sortedTriangleIndices({*ia, *ib, *ic});
+        if (!triangleKeys.insert(key).second) {
+            report.noDuplicateTriangles = false;
+            report.failedChecks.push_back("duplicate_triangle");
+        }
+        ++edgeCounts[sortedEdgeKey(*ia, *ib)];
+        ++edgeCounts[sortedEdgeKey(*ib, *ic)];
+        ++edgeCounts[sortedEdgeKey(*ic, *ia)];
+
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            if (i == *ia || i == *ib || i == *ic) continue;
+            const int incircleSign = predicates.incircle(tri.a, tri.b, tri.c, points[i]);
+            if (incircleSign > 0) {
+                report.emptyCircleProperty = false;
+                ++report.failedEmptyCircleChecks;
+            }
+        }
+    }
+    if (!report.emptyCircleProperty) report.failedChecks.push_back("empty_circle_property_failed");
+
+    std::set<std::pair<std::size_t, std::size_t>> hullEdges;
+    ConvexHullOptions hullOptions;
+    hullOptions.predicates = predicates;
+    const auto hull = convexHullAndrew(points, hullOptions);
+    report.hullArea = hull.area;
+    if (hull.hull.size() >= 3) {
+        for (std::size_t i = 0; i < hull.hull.size(); ++i) {
+            const auto a = findPointIndex(points, hull.hull[i], predicates);
+            const auto b = findPointIndex(points, hull.hull[(i + 1) % hull.hull.size()], predicates);
+            if (a.has_value() && b.has_value()) hullEdges.insert(sortedEdgeKey(*a, *b));
+        }
+    }
+
+    for (const auto& [edge, count] : edgeCounts) {
+        if (count == 0 || count > 2) report.edgesConsistent = false;
+        const bool isHullEdge = hullEdges.find(edge) != hullEdges.end();
+        if ((isHullEdge && count != 1) || (!isHullEdge && count != 2)) {
+            report.edgesConsistent = false;
+        }
+    }
+    if (!report.edgesConsistent) report.failedChecks.push_back("edges_not_consistent");
+
+    report.edgeCount = edgeCounts.size();
+    if (edgesOut != nullptr) {
+        edgesOut->clear();
+        edgesOut->reserve(edgeCounts.size());
+        for (const auto& [edge, count] : edgeCounts) {
+            (void)count;
+            edgesOut->push_back({points[edge.first], points[edge.second]});
+        }
+    }
+
+    report.areaError = std::fabs(report.triangleAreaSum - report.hullArea);
+    const double areaTolerance = 1e-7 * std::max(1.0, report.hullArea);
+    report.coversConvexHullArea = report.areaError <= areaTolerance;
+    if (!report.coversConvexHullArea) report.failedChecks.push_back("triangles_do_not_cover_convex_hull_area");
+    return report;
+}
 
 inline bool circumcircleContains(const Triangle2D& t, const Point2D& p) {
     return circumcircleContains(t, p, epsPredicateContext());
@@ -1333,8 +2100,17 @@ inline DelaunayResult delaunayTriangulation(const std::vector<Point2D>& input, c
     DelaunayResult result;
     const PredicateContext& predicates = options.predicates;
     std::vector<Point2D> points = removeDuplicatePoints(input, predicates);
+    if (points.size() != input.size()) {
+        result.warnings.push_back("duplicate_points_removed");
+    }
     if (points.size() < 3) {
         result.warnings.push_back("fewer_than_three_unique_points");
+        result.validation = validateDelaunayTriangulation(points, result.triangles, predicates, &result.edges);
+        return result;
+    }
+    if (allCollinear(points, predicates)) {
+        result.warnings.push_back("all_points_collinear");
+        result.validation = validateDelaunayTriangulation(points, result.triangles, predicates, &result.edges);
         return result;
     }
     double minX = points[0].x, maxX = points[0].x, minY = points[0].y, maxY = points[0].y;
@@ -1394,6 +2170,16 @@ inline DelaunayResult delaunayTriangulation(const std::vector<Point2D>& input, c
             continue;
         }
         result.triangles.push_back(tri);
+    }
+    result.validation = validateDelaunayTriangulation(points, result.triangles, predicates, &result.edges);
+    result.valid = result.validation.noDuplicateTriangles &&
+                   result.validation.allTrianglesCcw &&
+                   result.validation.noSuperTriangleVertex &&
+                   result.validation.edgesConsistent &&
+                   result.validation.emptyCircleProperty &&
+                   result.validation.coversConvexHullArea;
+    if (!result.valid) {
+        result.warnings.push_back("delaunay_validation_failed");
     }
     return result;
 }

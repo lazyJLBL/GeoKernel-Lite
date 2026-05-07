@@ -11,11 +11,13 @@ so documentation, demos, and test data stay aligned.
 | Convex hull             |     7 | empty input, small input, duplicates, all-collinear sets, interior points                               |
 | Rotating calipers       |     7 | degenerate hulls, rectangles, rotated hulls, duplicate points                                           |
 | Segment intersection    |     8 | crossing, endpoint touch, overlap, parallel disjoint, zero-length, near-collinear, predicate modes      |
+| Segment arrangement     |    10 | crosses, grids, shared endpoints, overlaps, duplicates, zero-length, near-collinear splits             |
 | Half-plane intersection |     7 | bounded result, empty result, unbounded clipping, duplicate planes, large coordinates, degenerate line  |
 | Polygon clipping        |     7 | inside, outside, partial overlap, boundary vertex, shared edge, degenerate line, concave subject        |
 | Closest pair            |     7 | duplicate points, tiny distance, large coordinates, grid ties, negative coordinates, insufficient input |
 | Triangulation           |     7 | convex, concave, clockwise input, duplicate vertex, collinear vertex, self-intersection                 |
 | Delaunay experimental   |     7 | triangle, square, duplicates, interior point, collinear input, large coordinates, random cloud          |
+| Polygon boolean skeleton |    13 | normalization, holes, invalid rings, invalid holes, multipolygon JSON contract                         |
 | Predicate comparison    |    50 | near-collinear orientation, near-cocircular incircle, duplicate points, mixed coordinate scales         |
 
 ## Convex Hull Cases

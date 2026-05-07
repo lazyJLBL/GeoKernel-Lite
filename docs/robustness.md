@@ -40,6 +40,8 @@ options.predicates = predicates;
 ```
 
 The CLI accepts `predicate_mode` and `predicate_eps` for predicate-aware algorithms.
+Predicate-aware CLI summaries echo both fields so repro JSON and result JSON preserve
+the numeric policy used for a run.
 
 ## Equality vs Ordering
 
@@ -206,11 +208,14 @@ triangles.
 - See [known_limitations.md](known_limitations.md) for the current project-wide list.
 - Some floating-point computations, such as distances, areas, and intersection
   coordinates, remain double-based even when predicate signs use exact arithmetic.
+- Polygon boolean currently validates and normalizes polygon-with-holes and
+  multipolygon input, but the actual overlay operation is still future work.
 - Exact predicates currently cover `orient2d` and `incircle`.
 - Segment intersection uses an event-based active-set sweep and exact predicate
   classification, with brute force retained as an oracle. Degenerate collinear overlaps
   are reported pairwise rather than merged into a topology graph.
 - Half-plane intersection is implemented through iterative polygon clipping for stable
   visualization behavior.
-- Delaunay triangulation is experimental and should be treated as a prototype for
-  non-degenerate point sets.
+- Delaunay triangulation is experimental and should be treated as a prototype, but it
+  now reports validation checks for triangle orientation, edge consistency, empty
+  circles, and convex-hull area coverage.

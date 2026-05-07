@@ -33,8 +33,8 @@ The implementation handles:
 - collinear overlaps
 - multiple segments meeting at one point
 
-Collinear overlaps are reported pairwise. P0 does not build a merged arrangement or
-topology graph.
+Collinear overlaps are reported pairwise by this API. Use `segment_arrangement` when a
+split graph with deduplicated nodes and atomic subsegments is needed.
 
 ## Complexity
 
