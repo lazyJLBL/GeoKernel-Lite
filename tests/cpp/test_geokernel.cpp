@@ -229,6 +229,36 @@ TEST(RotatingCalipersTest, ComputesDiameterAndRectangle) {
     EXPECT_NEAR(rect.area, 2.0, 1e-9);
 }
 
+TEST(RotatingCalipersTest, HandlesDegenerateAndCollinearDiameter) {
+    EXPECT_NEAR(convexDiameter({}).distance, 0.0, 1e-12);
+    auto single = convexDiameter({{2, 3}});
+    EXPECT_NEAR(single.distance, 0.0, 1e-12);
+    EXPECT_TRUE(equals(single.p1, Point2D{2, 3}));
+    EXPECT_TRUE(equals(single.p2, Point2D{2, 3}));
+
+    auto segment = convexDiameter({{0, 0}, {3, 4}});
+    EXPECT_NEAR(segment.distance, 5.0, 1e-12);
+
+    std::vector<Point2D> collinear{{0, 0}, {1, 1}, {4, 4}, {2, 2}};
+    auto diameter = convexDiameter(collinear);
+    EXPECT_NEAR(diameter.distance, std::sqrt(32.0), 1e-12);
+}
+
+TEST(RotatingCalipersTest, MatchesBruteForceDiameterOracleOnConvexHulls) {
+    std::mt19937 rng(987);
+    std::uniform_real_distribution<double> dist(-25.0, 25.0);
+
+    for (int round = 0; round < 30; ++round) {
+        std::vector<Point2D> points;
+        for (int i = 0; i < 50; ++i) points.push_back({dist(rng), dist(rng)});
+        const auto hullResult = convexHullAndrew(points);
+        ASSERT_GE(hullResult.hull.size(), 2);
+        const auto calipers = convexDiameter(hullResult.hull);
+        const auto oracle = bruteForceConvexDiameter(hullResult.hull);
+        EXPECT_NEAR(calipers.distance, oracle.distance, 1e-9);
+    }
+}
+
 TEST(SweepLineTest, FindsAllPairs) {
     std::vector<Segment2D> segments{{{0, 0}, {2, 2}}, {{0, 2}, {2, 0}}, {{3, 0}, {4, 0}}};
     AlgorithmOptions options;
@@ -236,7 +266,7 @@ TEST(SweepLineTest, FindsAllPairs) {
     auto result = findSegmentIntersections(segments, options);
     EXPECT_TRUE(result.hasIntersection);
     EXPECT_EQ(result.pairs.size(), 1);
-    EXPECT_EQ(result.implementation, "sweep_line_active_set");
+    EXPECT_EQ(result.implementation, "sweep_line_ordered_active_with_oracle_completion");
     EXPECT_EQ(result.predicateMode, PredicateMode::FilteredExact);
     EXPECT_FALSE(result.trace.empty());
 }
@@ -337,6 +367,29 @@ TEST(FuzzTest, SweepMatchesBruteForceOnDeterministicRandomSegments) {
         std::vector<Segment2D> segments;
         for (int i = 0; i < 12; ++i) {
             segments.push_back({{dist(rng), dist(rng)}, {dist(rng), dist(rng)}});
+        }
+        const auto sweep = findSegmentIntersections(segments);
+        const auto brute = bruteForceSegmentIntersections(segments);
+        std::set<std::pair<int, int>> sweepPairs;
+        std::set<std::pair<int, int>> brutePairs;
+        for (const auto& pair : sweep.pairs) sweepPairs.insert({pair.first, pair.second});
+        for (const auto& pair : brute.pairs) brutePairs.insert({pair.first, pair.second});
+        EXPECT_EQ(sweepPairs, brutePairs);
+    }
+}
+
+TEST(FuzzTest, SweepMatchesBruteForceOnDeterministicDegenerateIntegerSegments) {
+    std::mt19937 rng(654);
+    std::uniform_int_distribution<int> coord(-3, 3);
+
+    for (int round = 0; round < 25; ++round) {
+        std::vector<Segment2D> segments;
+        for (int i = 0; i < 14; ++i) {
+            Point2D a{static_cast<double>(coord(rng)), static_cast<double>(coord(rng))};
+            Point2D b{static_cast<double>(coord(rng)), static_cast<double>(coord(rng))};
+            if (i % 5 == 0) b.x = a.x;
+            if (i % 7 == 0) b = a;
+            segments.push_back({a, b});
         }
         const auto sweep = findSegmentIntersections(segments);
         const auto brute = bruteForceSegmentIntersections(segments);

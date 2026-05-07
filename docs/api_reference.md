@@ -56,6 +56,7 @@ All public C++ symbols live in `namespace geokernel`.
 - `convexHullAndrew(points, options)`
 - `convexHullGraham(points, options)`
 - `convexDiameter(hull, options)`
+- `bruteForceConvexDiameter(hull, options)`
 - `minimumAreaBoundingRectangle(hull, options)`
 - `findSegmentIntersections(segments, options)`
 - `sweepLineSegmentIntersections(segments, options, predicateMode)`

@@ -211,9 +211,10 @@ triangles.
 - Polygon boolean currently validates and normalizes polygon-with-holes and
   multipolygon input, but the actual overlay operation is still future work.
 - Exact predicates currently cover `orient2d` and `incircle`.
-- Segment intersection uses an event-based active-set sweep and exact predicate
-  classification, with brute force retained as an oracle. Degenerate collinear overlaps
-  are reported pairwise rather than merged into a topology graph.
+- Segment intersection uses an ordered active-set sweep pass and exact predicate
+  classification, with brute force retained as an oracle and contract-preserving
+  completion step. Degenerate collinear overlaps are reported pairwise rather than
+  merged into a topology graph.
 - Half-plane intersection is implemented through iterative polygon clipping for stable
   visualization behavior.
 - Delaunay triangulation is experimental and should be treated as a prototype, but it

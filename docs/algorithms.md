@@ -10,18 +10,34 @@ and supports `keepCollinear`. Orientation and duplicate policies use
 `convexHullGraham(points, options)` is exposed as a compatibility entry point and
 currently delegates to the same robust hull implementation.
 
-## Rotating Calipers
+## Rotating Calipers and Hull Rectangle
 
-`convexDiameter(hull)` returns the farthest pair on a convex hull.
-`minimumAreaBoundingRectangle(hull)` evaluates edge-aligned candidate rectangles and
-returns corners, area, width, height, and angle.
+`convexDiameter(hull)` returns the farthest pair on a convex hull using a true
+rotating-calipers scan. The input is expected to be a convex hull in cyclic order. Empty,
+single-point, two-point, and all-collinear hulls are handled explicitly. For nondegenerate
+convex hulls the scan is `O(h)` after the hull has already been constructed.
+
+`bruteForceConvexDiameter(hull)` remains available as an `O(h^2)` oracle for tests.
+
+`minimumAreaBoundingRectangle(hull)` evaluates every hull edge direction and projects all
+hull vertices onto that local frame. This is an honest edge-direction scan with `O(h^2)`
+work, not the fully optimized multi-caliper rectangle algorithm. It returns corners,
+area, width, height, and angle.
 
 ## Segment Intersection
 
 `findSegmentIntersections(segments, options, predicateMode)` defaults to the sweep-line
 implementation and returns all intersecting segment pairs with `None`, `Point`, or
-`Overlap` classification. The trace records sorted endpoint events, active-set candidate
-checks, and per-x sweep progress.
+`Overlap` classification. The current implementation uses an endpoint event queue, an
+ordered active sequence at the current sweep x-coordinate, predecessor/successor checks
+on insertion and deletion, and special checks for vertical and same-x event groups. The
+trace records sorted endpoint events, candidate checks, per-x sweep progress, and whether
+oracle completion was required.
+
+Because this public API promises all intersecting pairs, the implementation still runs
+the brute-force oracle as a completion pass when the endpoint-neighbor sweep misses pairs
+that would require full Bentley-Ottmann intersection events. This keeps the JSON contract
+correct while making the current sweep-line limitation explicit.
 
 The preferred C++ path is `options.predicates`; the `predicateMode` overload is retained
 for compatibility.

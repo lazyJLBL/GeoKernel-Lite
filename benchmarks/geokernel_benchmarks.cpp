@@ -1,22 +1,39 @@
 #include <chrono>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <random>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "geokernel/geokernel.hpp"
 
 using namespace geokernel;
 
+struct BenchRow {
+    std::string algorithm;
+    std::string implementation;
+    std::string dataset;
+    std::size_t n = 0;
+    double timeMs = 0.0;
+    std::size_t candidateChecks = 0;
+    std::size_t outputSize = 0;
+    std::string predicateMode = "filtered_exact";
+    unsigned seed = 0;
+};
+
 template <typename Fn>
-long long elapsedMs(Fn&& fn) {
+double elapsedMs(Fn&& fn) {
     const auto start = std::chrono::steady_clock::now();
     fn();
     const auto end = std::chrono::steady_clock::now();
-    return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-std::vector<Segment2D> generateSegments(std::size_t count) {
-    std::mt19937 rng(7);
+std::vector<Segment2D> sparseSegments(std::size_t count, unsigned seed) {
+    std::mt19937 rng(seed);
     std::uniform_real_distribution<double> xdist(0.0, static_cast<double>(count) * 4.0);
     std::uniform_real_distribution<double> ydist(-1000.0, 1000.0);
     std::uniform_real_distribution<double> len(0.5, 10.0);
@@ -26,49 +43,205 @@ std::vector<Segment2D> generateSegments(std::size_t count) {
     for (std::size_t i = 0; i < count; ++i) {
         const double x = xdist(rng);
         const double y = ydist(rng);
-        const double dx = len(rng);
-        const double dy = ydist(rng) * 0.01;
-        segments.push_back({{x, y}, {x + dx, y + dy}});
+        segments.push_back({{x, y}, {x + len(rng), y + ydist(rng) * 0.01}});
     }
     return segments;
 }
 
-int main() {
-    std::mt19937 rng(42);
+std::vector<Segment2D> denseCrossingSegments(std::size_t count) {
+    std::vector<Segment2D> segments;
+    segments.reserve(count);
+    const double right = static_cast<double>(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        segments.push_back({{0.0, static_cast<double>(i)}, {right, static_cast<double>(count - i)}});
+    }
+    return segments;
+}
+
+std::vector<Segment2D> degenerateSegments(std::size_t count) {
+    std::vector<Segment2D> segments;
+    segments.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const double x = static_cast<double>(i % 20);
+        const double y = static_cast<double>(i / 20);
+        if (i % 10 == 0) {
+            segments.push_back({{x, y}, {x, y}});
+        } else if (i % 3 == 0) {
+            segments.push_back({{x, -10.0}, {x, 10.0}});
+        } else {
+            segments.push_back({{-5.0, y}, {15.0, y}});
+        }
+    }
+    return segments;
+}
+
+std::vector<Point2D> randomPoints(std::size_t count, unsigned seed) {
+    std::mt19937 rng(seed);
     std::uniform_real_distribution<double> dist(-1000.0, 1000.0);
     std::vector<Point2D> points;
-    points.reserve(10000);
-    for (int i = 0; i < 10000; ++i) {
-        points.push_back({dist(rng), dist(rng)});
+    points.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) points.push_back({dist(rng), dist(rng)});
+    return points;
+}
+
+std::vector<Point2D> gridPoints(std::size_t side) {
+    std::vector<Point2D> points;
+    points.reserve(side * side);
+    for (std::size_t y = 0; y < side; ++y) {
+        for (std::size_t x = 0; x < side; ++x) {
+            points.push_back({static_cast<double>(x), static_cast<double>(y)});
+        }
+    }
+    return points;
+}
+
+std::vector<Point2D> circlePoints(std::size_t count) {
+    std::vector<Point2D> points;
+    points.reserve(count);
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    for (std::size_t i = 0; i < count; ++i) {
+        const double theta = 2.0 * pi * static_cast<double>(i) / static_cast<double>(count);
+        points.push_back({std::cos(theta), std::sin(theta)});
+    }
+    return points;
+}
+
+std::vector<Point2D> clusteredPoints(std::size_t count, unsigned seed) {
+    std::mt19937 rng(seed);
+    std::normal_distribution<double> center(-100.0, 100.0);
+    std::normal_distribution<double> noise(0.0, 0.1);
+    std::vector<Point2D> points;
+    points.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const double cx = center(rng);
+        const double cy = center(rng);
+        points.push_back({cx + noise(rng), cy + noise(rng)});
+    }
+    return points;
+}
+
+void writeCsv(const std::vector<BenchRow>& rows, const std::string& path) {
+    std::ofstream out(path);
+    out << "algorithm,implementation,dataset,n,time_ms,candidate_checks,output_size,predicate_mode,seed\n";
+    out << std::fixed << std::setprecision(3);
+    for (const auto& row : rows) {
+        out << row.algorithm << ','
+            << row.implementation << ','
+            << row.dataset << ','
+            << row.n << ','
+            << row.timeMs << ','
+            << row.candidateChecks << ','
+            << row.outputSize << ','
+            << row.predicateMode << ','
+            << row.seed << '\n';
+    }
+}
+
+void writeMarkdown(const std::vector<BenchRow>& rows, const std::string& path) {
+    std::ofstream out(path);
+    out << "# Benchmark Results\n\n";
+    out << "Generated by `geokernel_benchmarks` with deterministic datasets and fixed seeds.\n\n";
+    out << "| Algorithm | Implementation | Dataset | n | Time ms | Candidate checks | Output size | Predicate mode | Seed |\n";
+    out << "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |\n";
+    out << std::fixed << std::setprecision(3);
+    for (const auto& row : rows) {
+        out << "| " << row.algorithm
+            << " | " << row.implementation
+            << " | " << row.dataset
+            << " | " << row.n
+            << " | " << row.timeMs
+            << " | " << row.candidateChecks
+            << " | " << row.outputSize
+            << " | " << row.predicateMode
+            << " | " << row.seed
+            << " |\n";
+    }
+    out << "\nNotes:\n\n";
+    out << "- Segment intersection includes both brute-force and the current ordered sweep implementation.\n";
+    out << "- The sweep implementation preserves the all-pairs contract through oracle completion, so dense cases still show quadratic behavior.\n";
+    out << "- Times are local machine smoke numbers, not a formal performance claim.\n";
+}
+
+void printRows(const std::vector<BenchRow>& rows) {
+    std::cout << std::fixed << std::setprecision(3);
+    for (const auto& row : rows) {
+        std::cout << row.algorithm
+                  << " implementation=" << row.implementation
+                  << " dataset=" << row.dataset
+                  << " n=" << row.n
+                  << " time_ms=" << row.timeMs
+                  << " candidate_checks=" << row.candidateChecks
+                  << " output_size=" << row.outputSize
+                  << " predicate_mode=" << row.predicateMode
+                  << " seed=" << row.seed << '\n';
+    }
+}
+
+int main() {
+    std::vector<BenchRow> rows;
+    AlgorithmOptions options;
+    options.predicates = filteredExactPredicateContext();
+
+    for (const auto& dataset : {std::string{"random"}, std::string{"grid"}, std::string{"circle"}}) {
+        std::vector<Point2D> points;
+        unsigned seed = 42;
+        if (dataset == "random") {
+            points = randomPoints(10000, seed);
+        } else if (dataset == "grid") {
+            points = gridPoints(100);
+            seed = 0;
+        } else {
+            points = circlePoints(5000);
+            seed = 0;
+        }
+
+        ConvexHullResult hull;
+        const double hullMs = elapsedMs([&] { hull = convexHullAndrew(points); });
+        rows.push_back({"convex_hull", "andrew_monotone_chain", dataset, points.size(), hullMs, 0, hull.hull.size(), "filtered_exact", seed});
     }
 
-    const auto start = std::chrono::steady_clock::now();
-    const auto hull = convexHullAndrew(points);
-    const auto closest = closestPair(points);
-    const auto end = std::chrono::steady_clock::now();
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    for (const auto& dataset : {std::string{"random"}, std::string{"cluster"}, std::string{"duplicate"}}) {
+        std::vector<Point2D> points;
+        unsigned seed = 7;
+        if (dataset == "random") {
+            points = randomPoints(8000, seed);
+        } else if (dataset == "cluster") {
+            points = clusteredPoints(8000, seed);
+        } else {
+            points = randomPoints(8000, seed);
+            points.push_back(points.front());
+        }
 
-    std::cout << "points=" << points.size()
-              << " hull_vertices=" << hull.hull.size()
-              << " closest_distance=" << closest.distance
-              << " elapsed_ms=" << ms << '\n';
+        ClosestPairResult closest;
+        const double closestMs = elapsedMs([&] { closest = closestPair(points); });
+        rows.push_back({"closest_pair", "divide_and_conquer", dataset, points.size(), closestMs, 0, closest.valid ? 1u : 0u, "filtered_exact", seed});
+    }
 
-    for (const std::size_t count : {200u, 1000u, 5000u}) {
-        const auto segments = generateSegments(count);
+    struct SegmentDataset {
+        std::string name;
+        std::size_t n;
+        unsigned seed;
+        std::vector<Segment2D> segments;
+    };
+    std::vector<SegmentDataset> segmentDatasets{
+        {"sparse", 300, 11, sparseSegments(300, 11)},
+        {"sparse", 1000, 11, sparseSegments(1000, 11)},
+        {"dense_crossing", 80, 0, denseCrossingSegments(80)},
+        {"degenerate", 200, 0, degenerateSegments(200)}
+    };
+
+    for (const auto& dataset : segmentDatasets) {
         SegmentIntersectionSearchResult brute;
+        const double bruteMs = elapsedMs([&] { brute = bruteForceSegmentIntersections(dataset.segments, options); });
+        rows.push_back({"segment_intersection", "brute_force", dataset.name, dataset.n, bruteMs, brute.eventCount, brute.pairs.size(), "filtered_exact", dataset.seed});
+
         SegmentIntersectionSearchResult sweep;
-
-        const long long bruteMs = count <= 1000u
-            ? elapsedMs([&] { brute = bruteForceSegmentIntersections(segments); })
-            : -1;
-        const long long sweepMs = elapsedMs([&] { sweep = findSegmentIntersections(segments); });
-
-        std::cout << "segments=" << count
-                  << " brute_ms=" << bruteMs
-                  << " sweep_ms=" << sweepMs
-                  << " sweep_pairs=" << sweep.pairs.size()
-                  << " sweep_events=" << sweep.eventCount
-                  << " implementation=" << sweep.implementation << '\n';
+        const double sweepMs = elapsedMs([&] { sweep = findSegmentIntersections(dataset.segments, options); });
+        rows.push_back({"segment_intersection", sweep.implementation, dataset.name, dataset.n, sweepMs, sweep.eventCount, sweep.pairs.size(), "filtered_exact", dataset.seed});
     }
+
+    printRows(rows);
+    writeCsv(rows, "benchmarks/results.csv");
+    writeMarkdown(rows, "benchmarks/results.md");
     return 0;
 }

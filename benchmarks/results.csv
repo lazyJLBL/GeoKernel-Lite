@@ -1,0 +1,15 @@
+algorithm,implementation,dataset,n,time_ms,candidate_checks,output_size,predicate_mode,seed
+convex_hull,andrew_monotone_chain,random,10000,3.984,0,15,filtered_exact,42
+convex_hull,andrew_monotone_chain,grid,10000,61.669,0,4,filtered_exact,0
+convex_hull,andrew_monotone_chain,circle,5000,2.561,0,5000,filtered_exact,0
+closest_pair,divide_and_conquer,random,8000,9.011,0,1,filtered_exact,7
+closest_pair,divide_and_conquer,cluster,8000,9.856,0,1,filtered_exact,7
+closest_pair,divide_and_conquer,duplicate,8001,1.725,0,1,filtered_exact,7
+segment_intersection,brute_force,sparse,300,4.702,44850,2,filtered_exact,11
+segment_intersection,sweep_line_ordered_active_with_oracle_completion,sparse,300,5.827,600,2,filtered_exact,11
+segment_intersection,brute_force,sparse,1000,57.222,499500,1,filtered_exact,11
+segment_intersection,sweep_line_ordered_active_with_oracle_completion,sparse,1000,57.797,2000,1,filtered_exact,11
+segment_intersection,brute_force,dense_crossing,80,0.956,3160,3160,filtered_exact,0
+segment_intersection,sweep_line_ordered_active_with_oracle_completion,dense_crossing,80,6.067,160,3160,filtered_exact,0
+segment_intersection,brute_force,degenerate,200,17.379,19900,6612,filtered_exact,0
+segment_intersection,sweep_line_ordered_active_with_oracle_completion,degenerate,200,55.884,400,6612,filtered_exact,0

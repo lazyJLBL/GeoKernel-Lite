@@ -325,7 +325,18 @@ json runAlgorithm(const std::string& algorithm, const json& root, bool traceEnab
         };
         json trace = traceJson(diameter.trace);
         for (const auto& item : traceJson(rectangle.trace)) trace.push_back(item);
-        return envelope(body, {{"algorithm", "rotating_calipers"}, {"hull_vertices", hull.size()}, {"predicate_mode", predicateModeName(predicates.mode)}, {"predicate_eps", predicates.eps}}, trace, warningsJson(std::vector<std::string>{"distance_and_rectangle_constructions_use_double"}));
+        return envelope(
+            body,
+            {
+                {"algorithm", "rotating_calipers"},
+                {"hull_vertices", hull.size()},
+                {"diameter_implementation", "rotating_calipers_o_h"},
+                {"minimum_area_rectangle_implementation", "edge_direction_scan_o_h2"},
+                {"predicate_mode", predicateModeName(predicates.mode)},
+                {"predicate_eps", predicates.eps}
+            },
+            trace,
+            warningsJson(std::vector<std::string>{"distance_and_rectangle_constructions_use_double"}));
     }
 
     if (algorithm == "segment_intersection" || algorithm == "sweep_line") {

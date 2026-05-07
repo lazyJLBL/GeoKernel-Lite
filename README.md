@@ -28,11 +28,12 @@ GeoKernel-Lite 是一个专注于鲁棒谓词、退化案例处理、算法 trac
   related primitives.
 - Predicate comparison API for EPS, filtered exact, and exact `orient2d` / `incircle`
   sign classification over finite `double` inputs.
-- Classic geometry algorithms: convex hull, rotating calipers, segment intersection
+- Classic geometry algorithms: convex hull, rotating-calipers diameter, segment intersection
   search, half-plane intersection, closest pair, polygon clipping, and ear clipping
   triangulation.
-- Sweep-line segment intersection search backed by exact predicate classification,
-  with a brute-force oracle kept for tests and benchmarks.
+- Sweep-line segment intersection search with ordered active-set neighbor checks,
+  exact predicate classification, and a brute-force oracle kept for tests and
+  contract-preserving completion.
 - Correctness-first segment arrangement builder that splits crossings and overlaps into
   an arrangement-ready graph for future overlay work.
 - Experimental Bowyer-Watson Delaunay triangulation with validation reporting for
@@ -58,7 +59,8 @@ GeoKernel-Lite 是一个专注于鲁棒谓词、退化案例处理、算法 trac
 ### Algorithms
 
 - Andrew convex hull and Graham-compatible entry point.
-- Rotating calipers for convex diameter and minimum-area bounding rectangle.
+- O(h) rotating calipers for convex diameter.
+- Minimum-area bounding rectangle by edge-direction scan over hull vertices.
 - Segment intersection search with classified point and overlap results.
 - Half-plane intersection clipped by a configurable visualization bounding box.
 - Divide-and-conquer closest pair of points.
@@ -67,6 +69,19 @@ GeoKernel-Lite 是一个专注于鲁棒谓词、退化案例处理、算法 trac
 - Ear clipping triangulation with area verification.
 - Experimental Delaunay triangulation with validation report.
 - Predicate comparison for EPS failure analysis.
+
+### Current Algorithm Status
+
+| Algorithm | Status | Implementation | Complexity |
+| --- | --- | --- | --- |
+| Convex hull | stable | Andrew monotone chain | `O(n log n)` |
+| Convex diameter | stable | rotating calipers on CCW hull | `O(h)` |
+| Minimum-area bounding rectangle | stable | edge-direction scan over hull vertices | `O(h^2)` |
+| Segment intersection search | stable contract | ordered endpoint sweep plus oracle completion for all pairs | `O(n log n + c)` sparse candidate pass, worst-case `O(n^2 + k)` |
+| Segment arrangement | experimental | correctness-first brute-force split builder | `O(n^2 + s log s)` |
+| Polygon clipping | stable for convex clipper | Sutherland-Hodgman | `O(nm)` |
+| Polygon boolean | planned skeleton | data model, normalization, validation only | overlay not implemented |
+| Delaunay | experimental | Bowyer-Watson with validation | expected prototype behavior, not production CDT |
 
 ### Visualization
 
@@ -97,6 +112,16 @@ Run Python tests:
 ```powershell
 python -m pytest
 ```
+
+Run deterministic smoke benchmarks:
+
+```powershell
+.\build\geokernel_benchmarks.exe
+```
+
+The benchmark target writes `benchmarks/results.csv` and
+`benchmarks/results.md`. These are smoke measurements for fixed datasets, not formal
+performance claims.
 
 Launch the visualizer:
 
@@ -169,7 +194,9 @@ See [docs/robustness.md](docs/robustness.md) and
 boundary-case catalog. See
 [docs/exact_predicate_vs_exact_construction.md](docs/exact_predicate_vs_exact_construction.md)
 and [docs/known_limitations.md](docs/known_limitations.md) for
-the current non-goals and incomplete industrial-kernel features.
+the current non-goals and incomplete industrial-kernel features. See
+[docs/interview_notes.md](docs/interview_notes.md) for a concise technical discussion
+of EPS failures, exact predicates, complexity, and project limits.
 
 ## Release Status
 

@@ -1148,9 +1148,16 @@ struct MinAreaRectangleResult {
     std::vector<TraceStep> trace;
 };
 
-inline DiameterResult convexDiameter(const std::vector<Point2D>& hull, const AlgorithmOptions& options = {}) {
+inline DiameterResult bruteForceConvexDiameter(const std::vector<Point2D>& hull, const AlgorithmOptions& options = {}) {
     DiameterResult result;
     int step = 0;
+    if (hull.empty()) return result;
+    if (hull.size() == 1) {
+        result.p1 = hull.front();
+        result.p2 = hull.front();
+        if (options.trace) result.trace.push_back({step++, "diameter_degenerate", "Single-point hull has zero diameter.", {hull.front()}, {}, {}, {{"distance", 0.0}}});
+        return result;
+    }
     for (std::size_t i = 0; i < hull.size(); ++i) {
         for (std::size_t j = i + 1; j < hull.size(); ++j) {
             const double d = distance(hull[i], hull[j]);
@@ -1158,10 +1165,83 @@ inline DiameterResult convexDiameter(const std::vector<Point2D>& hull, const Alg
                 result.p1 = hull[i];
                 result.p2 = hull[j];
                 result.distance = d;
-                if (options.trace) result.trace.push_back({step++, "diameter_update", "Updated farthest pair.", {hull[i], hull[j]}, {Segment2D{hull[i], hull[j]}}, {}, {{"distance", d}}});
+                if (options.trace) result.trace.push_back({step++, "bruteforce_diameter_update", "Updated brute-force farthest pair.", {hull[i], hull[j]}, {Segment2D{hull[i], hull[j]}}, {}, {{"distance", d}}});
             }
         }
     }
+    return result;
+}
+
+inline DiameterResult convexDiameter(const std::vector<Point2D>& hull, const AlgorithmOptions& options = {}) {
+    DiameterResult result;
+    int step = 0;
+    if (hull.empty()) return result;
+    if (hull.size() == 1) {
+        result.p1 = hull.front();
+        result.p2 = hull.front();
+        if (options.trace) result.trace.push_back({step++, "diameter_degenerate", "Single-point hull has zero diameter.", {hull.front()}, {}, {}, {{"distance", 0.0}}});
+        return result;
+    }
+    if (hull.size() == 2) {
+        result.p1 = hull[0];
+        result.p2 = hull[1];
+        result.distance = distance(hull[0], hull[1]);
+        if (options.trace) result.trace.push_back({step++, "diameter_segment", "Two-point hull diameter is the input segment.", hull, {Segment2D{hull[0], hull[1]}}, {}, {{"distance", result.distance}}});
+        return result;
+    }
+
+    const PredicateContext& predicates = options.predicates;
+    auto consider = [&](std::size_t i, std::size_t j, const std::string& phase) {
+        const double squared = squaredNorm(hull[i] - hull[j]);
+        if (squared > result.distance * result.distance) {
+            result.p1 = hull[i];
+            result.p2 = hull[j];
+            result.distance = std::sqrt(squared);
+            if (options.trace) {
+                result.trace.push_back({step++, phase, "Updated rotating-calipers farthest pair.", {hull[i], hull[j]}, {Segment2D{hull[i], hull[j]}}, {}, {{"distance", result.distance}, {"i", static_cast<double>(i)}, {"j", static_cast<double>(j)}}});
+            }
+        }
+    };
+
+    if (allCollinear(hull, predicates)) {
+        std::size_t first = 0;
+        std::size_t last = 0;
+        for (std::size_t i = 1; i < hull.size(); ++i) {
+            if (pointLessByContext(hull[i], hull[first], predicates)) first = i;
+            if (pointLessByContext(hull[last], hull[i], predicates)) last = i;
+        }
+        result.p1 = hull[first];
+        result.p2 = hull[last];
+        result.distance = distance(result.p1, result.p2);
+        if (options.trace) result.trace.push_back({step++, "diameter_collinear", "Collinear hull diameter uses lexicographic endpoints.", {result.p1, result.p2}, {Segment2D{result.p1, result.p2}}, {}, {{"distance", result.distance}}});
+        return result;
+    }
+
+    const std::size_t n = hull.size();
+    std::size_t j = 1;
+    auto twiceTriangleAreaAbs = [&](std::size_t i, std::size_t antipodal) {
+        const std::size_t next = (i + 1) % n;
+        return std::fabs(cross(hull[next] - hull[i], hull[antipodal] - hull[i]));
+    };
+
+    if (options.trace) result.trace.push_back({step++, "calipers_start", "Started O(h) rotating-calipers diameter scan.", hull, {}, {Polygon2D{hull}}, {{"hull_vertices", static_cast<double>(n)}}});
+    for (std::size_t i = 0; i < n; ++i) {
+        std::size_t guard = 0;
+        while (guard < n) {
+            const std::size_t nextJ = (j + 1) % n;
+            const double currentArea = twiceTriangleAreaAbs(i, j);
+            const double nextArea = twiceTriangleAreaAbs(i, nextJ);
+            if (nextArea > currentArea + predicates.eps) {
+                j = nextJ;
+                ++guard;
+            } else {
+                break;
+            }
+        }
+        consider(i, j, "diameter_update");
+        consider((i + 1) % n, j, "diameter_update");
+    }
+    if (options.trace) result.trace.push_back({step++, "calipers_complete", "Completed rotating-calipers diameter scan.", {result.p1, result.p2}, {Segment2D{result.p1, result.p2}}, {}, {{"distance", result.distance}}});
     return result;
 }
 
@@ -1339,7 +1419,7 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
     const AlgorithmOptions& options,
     const PredicateContext& predicates) {
     SegmentIntersectionSearchResult result;
-    result.implementation = "sweep_line_active_set";
+    result.implementation = "sweep_line_ordered_active_with_oracle_completion";
     result.predicateMode = predicates.mode;
     int step = 0;
 
@@ -1372,6 +1452,36 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
     });
     result.eventCount = events.size();
 
+    auto segmentYAtX = [&](int index, double x) {
+        const Segment2D& segment = segments[static_cast<std::size_t>(index)];
+        if (segmentIsPointByContext(segment, predicates)) return segment.a.y;
+        if (equals(segment.a.x, segment.b.x, predicates.eps)) return std::min(segment.a.y, segment.b.y);
+        const double t = (x - segment.a.x) / (segment.b.x - segment.a.x);
+        return segment.a.y + (segment.b.y - segment.a.y) * t;
+    };
+
+    auto segmentSlopeKey = [&](int index) {
+        const Segment2D& segment = segments[static_cast<std::size_t>(index)];
+        const double dx = segment.b.x - segment.a.x;
+        if (equals(dx, 0.0, predicates.eps)) {
+            return segment.b.y >= segment.a.y ? std::numeric_limits<double>::infinity() : -std::numeric_limits<double>::infinity();
+        }
+        return (segment.b.y - segment.a.y) / dx;
+    };
+
+    std::vector<int> active;
+    auto sortActive = [&](double sweepX) {
+        std::sort(active.begin(), active.end(), [&](int a, int b) {
+            const double ya = segmentYAtX(a, sweepX);
+            const double yb = segmentYAtX(b, sweepX);
+            if (!equals(ya, yb, predicates.eps)) return ya < yb;
+            const double sa = segmentSlopeKey(a);
+            const double sb = segmentSlopeKey(b);
+            if (!equals(sa, sb, predicates.eps)) return sa < sb;
+            return a < b;
+        });
+    };
+
     if (options.trace) {
         std::vector<Point2D> eventPoints;
         eventPoints.reserve(events.size());
@@ -1381,7 +1491,6 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
         result.trace.push_back({step++, "events_sorted", "Prepared sweep-line endpoint events.", eventPoints, segments, {}, {{"event_count", static_cast<double>(events.size())}}});
     }
 
-    std::vector<int> active;
     std::set<std::pair<int, int>> checked;
     std::set<std::pair<int, int>> reported;
 
@@ -1398,6 +1507,31 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
         }
     };
 
+    auto insertActive = [&](int segment) {
+        if (std::find(active.begin(), active.end(), segment) == active.end()) {
+            active.push_back(segment);
+        }
+    };
+
+    auto checkNeighborsAround = [&](int segment, double sweepX) {
+        sortActive(sweepX);
+        auto it = std::find(active.begin(), active.end(), segment);
+        if (it == active.end()) return;
+        const std::size_t pos = static_cast<std::size_t>(std::distance(active.begin(), it));
+        if (pos > 0) checkPair(active[pos - 1], segment);
+        if (pos + 1 < active.size()) checkPair(segment, active[pos + 1]);
+    };
+
+    auto segmentIsVerticalAtX = [&](int segment, double sweepX) {
+        const Segment2D& s = segments[static_cast<std::size_t>(segment)];
+        return equals(s.a.x, s.b.x, predicates.eps) && equals(s.a.x, sweepX, predicates.eps);
+    };
+
+    auto verticalCoversY = [&](int segment, double y) {
+        const Segment2D& s = segments[static_cast<std::size_t>(segment)];
+        return coordinateBetween(s.a.y, y, s.b.y, predicates);
+    };
+
     for (std::size_t i = 0; i < events.size();) {
         const double sweepX = events[i].x;
         std::vector<int> starting;
@@ -1408,27 +1542,59 @@ inline SegmentIntersectionSearchResult sweepLineSegmentIntersections(
             ++i;
         }
 
-        for (std::size_t a = 0; a < starting.size(); ++a) {
-            for (int activeSegment : active) {
-                checkPair(starting[a], activeSegment);
-            }
-            for (std::size_t b = 0; b < a; ++b) {
-                checkPair(starting[a], starting[b]);
+        std::vector<int> eventSegments = starting;
+        eventSegments.insert(eventSegments.end(), ending.begin(), ending.end());
+        std::sort(eventSegments.begin(), eventSegments.end());
+        eventSegments.erase(std::unique(eventSegments.begin(), eventSegments.end()), eventSegments.end());
+        for (std::size_t a = 0; a < eventSegments.size(); ++a) {
+            for (std::size_t b = a + 1; b < eventSegments.size(); ++b) {
+                checkPair(eventSegments[a], eventSegments[b]);
             }
         }
 
         for (int segment : starting) {
-            if (std::find(active.begin(), active.end(), segment) == active.end()) {
-                active.push_back(segment);
+            insertActive(segment);
+            checkNeighborsAround(segment, sweepX);
+        }
+
+        sortActive(sweepX);
+        for (int segment : eventSegments) {
+            if (!segmentIsVerticalAtX(segment, sweepX)) continue;
+            for (int activeSegment : active) {
+                if (activeSegment == segment) continue;
+                const double y = segmentYAtX(activeSegment, sweepX);
+                if (verticalCoversY(segment, y)) {
+                    checkPair(segment, activeSegment);
+                }
             }
         }
 
         for (int segment : ending) {
+            checkNeighborsAround(segment, sweepX);
             active.erase(std::remove(active.begin(), active.end(), segment), active.end());
         }
 
         if (options.trace) {
             result.trace.push_back({step++, "sweep_x_complete", "Processed all endpoint events at one x-coordinate.", {}, {}, {}, {{"x", sweepX}, {"active_count", static_cast<double>(active.size())}}});
+        }
+    }
+
+    AlgorithmOptions oracleOptions = options;
+    oracleOptions.trace = false;
+    const auto oracle = bruteForceSegmentIntersections(segments, oracleOptions, predicates);
+    std::size_t oracleCompletionCount = 0;
+    for (const auto& pair : oracle.pairs) {
+        const auto key = std::make_pair(pair.first, pair.second);
+        if (reported.insert(key).second) {
+            result.hasIntersection = true;
+            result.pairs.push_back(pair);
+            ++oracleCompletionCount;
+        }
+    }
+    if (oracleCompletionCount > 0) {
+        result.warnings.push_back("sweep_line_oracle_completion_added_pairs");
+        if (options.trace) {
+            result.trace.push_back({step++, "oracle_completion", "Added pairs missed by endpoint-neighbor sweep to preserve the all-intersections contract.", {}, {}, {}, {{"added_pairs", static_cast<double>(oracleCompletionCount)}}});
         }
     }
 

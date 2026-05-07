@@ -30,6 +30,12 @@ a replacement for CGAL, GEOS, OpenCascade, or a production CAD/GIS kernel.
 
 - Half-plane intersection is implemented as iterative clipping against a finite
   bounding box for visualization stability.
+- `minimumAreaBoundingRectangle` is an edge-direction scan over all hull vertices
+  (`O(h^2)`). Only `convexDiameter` currently uses a true `O(h)` rotating-calipers
+  implementation.
+- `sweepLineSegmentIntersections` has an ordered active-set neighbor pass, but it keeps
+  a brute-force completion step to preserve the all-intersecting-pairs API until a full
+  Bentley-Ottmann event scheduler is implemented.
 - Delaunay triangulation remains experimental. Predicate-aware incircle classification
   and validation reports are wired in, but the triangulation does not yet provide
   industrial-grade neighbor structures, constrained edges, symbolic perturbation, or
